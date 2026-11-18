@@ -80,12 +80,10 @@ To avoid hitting output token limits:
 
 Sometimes token limit errors are caused by 
 non-compliant API proxy servers
-or bugs in the API server you are using to host a local model.
+or bugs in the API server you are using to host a model.
 Aider has been well tested when directly connecting to 
 major 
 [LLM provider cloud APIs](https://aider.chat/docs/llms.html).
-For serving local models, 
-[Ollama](https://aider.chat/docs/llms/ollama.html) is known to work well with aider.
 
 Try using aider without an API proxy server
 or directly with one of the recommended cloud APIs

@@ -4,6 +4,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import webbrowser
 from collections import defaultdict
@@ -26,11 +27,13 @@ from prompt_toolkit.shortcuts import CompleteStyle, PromptSession
 from prompt_toolkit.styles import Style
 from pygments.lexers import MarkdownLexer, guess_lexer_for_filename
 from pygments.token import Token
+from rich.cells import cell_len
 from rich.color import ColorParseError
 from rich.columns import Columns
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.style import Style as RichStyle
+from rich.syntax import Syntax
 from rich.text import Text
 
 from aider.mdstream import MarkdownStream
@@ -52,6 +55,39 @@ def ensure_hash_prefix(color):
         if all(c in "0123456789ABCDEFabcdef" for c in color) and len(color) in (3, 6):
             return f"#{color}"
     return color
+
+
+def _glyph(unicode_glyph, ascii_glyph):
+    """Return the Unicode glyph if the output encoding can show it, else the ASCII one."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        unicode_glyph.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return ascii_glyph
+    return unicode_glyph
+
+
+def _status_label(glyph, ascii_glyph, word, message):
+    """'✗ Error:' before a message, or only the glyph when the message already says it."""
+    mark = _glyph(glyph, ascii_glyph)
+    plain = message.plain if isinstance(message, Text) else str(message)
+    if plain.strip().lower().startswith(word.lower()):
+        return mark
+    return f"{mark} {word}:"
+
+
+def _labelled(text, label):
+    """Put a bold label before the first line; continuation lines are indented under it."""
+    indent = " " * (len(label) + 1)
+    result = Text()
+    for number, line in enumerate(text.plain.rstrip("\n").split("\n")):
+        if number == 0:
+            result.append(label, style="bold")
+            result.append(" ")
+        else:
+            result.append("\n" + indent)
+        result.append(line)
+    return result
 
 
 def restore_multiline(func):
@@ -402,6 +438,10 @@ class InputOutput:
         if not self.pretty:
             return Style.from_dict(style_dict)
 
+        # Status (rprompt, or the bottom toolbar when it does not fit): quiet, no reverse video.
+        style_dict["rprompt"] = "fg:ansibrightblack"
+        style_dict["bottom-toolbar"] = "noreverse fg:ansibrightblack"
+
         if self.user_input_color:
             style_dict.setdefault("", self.user_input_color)
             style_dict.update(
@@ -506,10 +546,10 @@ class InputOutput:
                 self.tool_error(f"Unable to write file {filename}: {err}")
                 raise
 
-    def rule(self):
+    def rule(self, title=""):
         if self.pretty:
             style = dict(style=self.user_input_color) if self.user_input_color else dict()
-            self.console.rule(**style)
+            self.console.rule(title, **style)
         else:
             print()
 
@@ -529,7 +569,7 @@ class InputOutput:
         abs_read_only_fnames=None,
         edit_format=None,
     ):
-        self.rule()
+        self.rule("you")
 
         # Ring the bell if needed
         self.ring_bell()
@@ -556,6 +596,9 @@ class InputOutput:
         multiline_input = False
 
         style = self._get_style()
+        status_kwargs = (
+            self._status_placement(show, commands, len(rel_fnames)) if self.pretty else {}
+        )
 
         completer_instance = ThreadedCompleter(
             AutoCompleter(
@@ -663,6 +706,7 @@ class InputOutput:
                         key_bindings=kb,
                         complete_while_typing=True,
                         prompt_continuation=get_continuation,
+                        **status_kwargs,
                     )
                 else:
                     line = input(show)
@@ -963,7 +1007,58 @@ class InputOutput:
 
         return res
 
-    def _tool_message(self, message="", strip=True, color=None):
+    def _status_placement(self, show, commands, file_count):
+        """Choose where the status goes for this prompt, as keyword arguments for prompt().
+
+        rprompt sits on the first line of the prompt, and prompt_toolkit hides it when that
+        line is full (measured: three long file names at 40 columns hid it completely). So it
+        is used only when the first line leaves room. Otherwise the bottom toolbar is used:
+        it is always visible, at the cost of one line at the bottom of the screen.
+        """
+        status = self._status_for(commands, file_count)
+        first = show.split("\n", 1)[0] if "\n" in show else ""
+        width = shutil.get_terminal_size().columns
+        if cell_len(first.rstrip()) + cell_len(status()) + 2 <= width:
+            return {"rprompt": status}
+        return {"bottom_toolbar": status}
+
+    def _status_for(self, commands, file_count):
+        """Status for the right of the prompt line (rprompt), shortened to fit the width.
+
+        Model, file count and mode are always shown. The edit format is dropped below 60
+        columns and the key hints below 100, so nothing is cut in the middle of a word.
+        prompt_toolkit hides the rprompt when typed text reaches it.
+        """
+        coder = getattr(commands, "coder", None)
+        model = getattr(getattr(coder, "main_model", None), "name", None) or "no model"
+        edit_format = getattr(coder, "edit_format", None)
+        files = f"{file_count} file{'s' if file_count != 1 else ''}"
+        separator = f" {_glyph('·', '|')} "
+
+        def render():
+            width = shutil.get_terminal_size().columns
+            mode = "multiline" if self.multiline_mode else "single-line"
+            if width < 60:
+                mode = "multi" if self.multiline_mode else "single"
+            parts = [model]
+            if edit_format and width >= 60:
+                parts.append(str(edit_format))
+            parts.append(files)
+            parts.append(mode)
+            text = separator.join(parts)
+            if width >= 100:
+                if self.multiline_mode:
+                    text += "    Enter newline  Alt+Enter send"
+                else:
+                    text += "    Enter send  Alt+Enter newline"
+            return f" {text} "
+
+        return render
+
+    def _assistant_header(self):
+        self.console.rule("aider", style=self.assistant_output_color or "rule.line")
+
+    def _tool_message(self, message="", strip=True, color=None, label=None):
         if message.strip():
             if "\n" in message:
                 for line in message.splitlines():
@@ -974,6 +1069,9 @@ class InputOutput:
 
         if not isinstance(message, Text):
             message = Text(message)
+        if label and message.plain.strip():
+            # Display only: the chat history above keeps the plain message.
+            message = _labelled(message, label)
         color = ensure_hash_prefix(color) if color else None
         style = dict(style=color) if self.pretty and color else dict()
         try:
@@ -987,10 +1085,12 @@ class InputOutput:
 
     def tool_error(self, message="", strip=True):
         self.num_error_outputs += 1
-        self._tool_message(message, strip, self.tool_error_color)
+        label = _status_label("✗", "x", "Error", message)
+        self._tool_message(message, strip, self.tool_error_color, label=label)
 
     def tool_warning(self, message="", strip=True):
-        self._tool_message(message, strip, self.tool_warning_color)
+        label = _status_label("▲", "!", "Warning", message)
+        self._tool_message(message, strip, self.tool_warning_color, label=label)
 
     def tool_output(self, *messages, log_only=False, bold=False):
         if messages:
@@ -1012,6 +1112,8 @@ class InputOutput:
         self.console.print(*messages, style=style)
 
     def get_assistant_mdstream(self):
+        if self.pretty:
+            self._assistant_header()
         mdargs = dict(
             style=self.assistant_output_color,
             code_theme=self.code_theme,
@@ -1032,6 +1134,7 @@ class InputOutput:
             pretty = self.pretty
 
         if pretty:
+            self._assistant_header()
             show_resp = Markdown(
                 message, style=self.assistant_output_color, code_theme=self.code_theme
             )
@@ -1046,6 +1149,18 @@ class InputOutput:
 
     def print(self, message=""):
         print(message)
+
+    def print_diff(self, diff):
+        """Show a unified diff with coloured additions and removals (plain when not pretty)."""
+        if not self.pretty:
+            self.print(diff)
+            return
+        try:
+            syntax = Syntax(diff, "diff", theme=self.code_theme, background_color="default")
+        except Exception:
+            self.print(diff)
+            return
+        self.console.print(syntax)
 
     def llm_started(self):
         """Mark that the LLM has started processing, so we should ring the bell on next input"""

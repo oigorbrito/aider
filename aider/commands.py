@@ -1,6 +1,7 @@
 import getpass
 import glob
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -771,7 +772,16 @@ class Commands:
 
         self.io.tool_output(f"Diff since {commit_before_message[:7]}...")
 
+        if self.coder.pretty and platform.system() == "Windows":
+            # Coloured view. Measured on Windows (Gate 2): the previous path printed plain text.
+            diff = self.coder.repo.diff_commits(False, commit_before_message, "HEAD")
+            self.io.print_diff(diff)
+            return
+
         if self.coder.pretty:
+            # POSIX: keep the previous path. run_cmd runs git in a pty there, so git keeps its
+            # colours and its pager. Checked on Linux (Ubuntu under WSL): colours and pager work,
+            # and `q` leaves the pager.
             run_cmd(f"git diff {commit_before_message}")
             return
 

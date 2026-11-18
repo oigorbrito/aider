@@ -608,3 +608,180 @@ class TestInputOutputFormatFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPresentationLayer(unittest.TestCase):
+    """Display-only changes: labels, rules, status bar, diff colours, elapsed time."""
+
+    def _io(self, tmp_path=None, pretty=True):
+        from aider.io import InputOutput
+
+        history = str(tmp_path / "chat.md") if tmp_path else None
+        io = InputOutput(pretty=pretty, fancy_input=False, chat_history_file=history)
+        return io
+
+    def test_error_label_is_display_only(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            io = self._io(Path(tmp))
+            with patch.object(io.console, "print") as mock_print:
+                io.tool_error("boom happened")
+            shown = mock_print.call_args[0][0]
+            self.assertTrue(shown.plain.endswith("boom happened"))
+            self.assertIn("Error:", shown.plain)
+            history = (Path(tmp) / "chat.md").read_text(encoding="utf-8")
+            self.assertIn("boom happened", history)
+            self.assertNotIn("Error:", history)
+
+    def test_warning_label_is_shown(self):
+        io = self._io()
+        with patch.object(io.console, "print") as mock_print:
+            io.tool_warning("careful")
+        self.assertIn("Warning:", mock_print.call_args[0][0].plain)
+
+    def test_labelled_indents_continuation_lines(self):
+        from rich.text import Text
+
+        from aider.io import _labelled
+
+        result = _labelled(Text("first\nsecond"), "x Error:")
+        self.assertEqual(result.plain, "x Error: first\n         second")
+
+    def test_glyph_falls_back_to_ascii_on_narrow_encoding(self):
+        import types
+
+        from aider.io import _glyph
+
+        with patch("sys.stdout", types.SimpleNamespace(encoding="cp1252")):
+            self.assertEqual(_glyph("\u2717", "x"), "x")
+        with patch("sys.stdout", types.SimpleNamespace(encoding="utf-8")):
+            self.assertEqual(_glyph("\u2717", "x"), "\u2717")
+
+    def test_rule_takes_a_title(self):
+        io = self._io()
+        with patch.object(io.console, "rule") as mock_rule:
+            io.rule("you")
+        self.assertEqual(mock_rule.call_args[0][0], "you")
+
+    def test_assistant_output_adds_header_when_pretty(self):
+        io = self._io()
+        with patch.object(io.console, "rule") as mock_rule, patch.object(io.console, "print"):
+            io.assistant_output("hello", pretty=True)
+        self.assertEqual(mock_rule.call_args[0][0], "aider")
+
+    def test_assistant_output_has_no_header_when_plain(self):
+        io = self._io(pretty=False)
+        with patch.object(io.console, "rule") as mock_rule, patch.object(io.console, "print"):
+            io.assistant_output("hello", pretty=False)
+        mock_rule.assert_not_called()
+
+    def _status_commands(self, edit_format="diff"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            coder=SimpleNamespace(
+                main_model=SimpleNamespace(name="gpt-test"), edit_format=edit_format
+            )
+        )
+
+    def test_status_shows_model_format_files_and_keys_when_wide(self):
+        io = self._io()
+        commands = self._status_commands()
+        with patch("aider.io.shutil.get_terminal_size", return_value=os.terminal_size((120, 30))):
+            text = io._status_for(commands, 2)()
+            self.assertIn("gpt-test", text)
+            self.assertIn("diff", text)
+            self.assertIn("2 files", text)
+            self.assertIn("single-line", text)
+            self.assertIn("Enter send", text)
+            io.multiline_mode = True
+            multi = io._status_for(commands, 1)()
+        self.assertIn("multiline", multi)
+        self.assertIn("1 file", multi)
+        self.assertIn("Alt+Enter send", multi)
+
+    def test_status_keeps_essentials_on_narrow_terminal(self):
+        io = self._io()
+        commands = self._status_commands()
+        with patch("aider.io.shutil.get_terminal_size", return_value=os.terminal_size((50, 30))):
+            text = io._status_for(commands, 3)()
+        self.assertIn("gpt-test", text)  # model is never dropped
+        self.assertIn("3 files", text)  # file count is never dropped
+        self.assertIn("single", text)  # mode is never dropped
+        self.assertNotIn("diff", text)  # edit format is dropped below 60 columns
+        self.assertNotIn("Enter send", text)  # key hints are dropped below 100 columns
+        self.assertLessEqual(len(text), 50)  # never wider than the terminal
+
+    def test_status_without_commands_still_renders(self):
+        io = self._io()
+        with patch("aider.io.shutil.get_terminal_size", return_value=os.terminal_size((120, 30))):
+            text = io._status_for(None, 0)()
+        self.assertIn("no model", text)
+        self.assertIn("0 files", text)
+
+    def test_get_input_passes_status_as_rprompt(self):
+        import tempfile
+        from types import SimpleNamespace
+
+        io = self._io()
+        io.prompt_session = MagicMock()
+        io.prompt_session.prompt.return_value = "hello"
+        commands = SimpleNamespace(
+            coder=SimpleNamespace(main_model=SimpleNamespace(name="m"), edit_format=None),
+            get_commands=lambda: [],
+        )
+        with tempfile.TemporaryDirectory() as root:
+            io.get_input(root, [], [], commands, edit_format=None)
+        kwargs = io.prompt_session.prompt.call_args.kwargs
+        self.assertTrue(callable(kwargs["rprompt"]))
+        self.assertNotIn("bottom_toolbar", kwargs)
+
+    def test_status_uses_rprompt_when_the_first_line_leaves_room(self):
+        io = self._io()
+        with patch("aider.io.shutil.get_terminal_size", return_value=os.terminal_size((120, 30))):
+            placed = io._status_placement("app.py\n> ", self._status_commands(), 1)
+            no_files = io._status_placement("> ", self._status_commands(), 0)
+        self.assertIn("rprompt", placed)
+        self.assertIn("rprompt", no_files)
+
+    def test_status_moves_to_bottom_toolbar_when_the_first_line_is_full(self):
+        io = self._io()
+        full_line = "x_" * 30 + ".py"  # 63 cells: no room left beside the status
+        with patch("aider.io.shutil.get_terminal_size", return_value=os.terminal_size((70, 30))):
+            placed = io._status_placement(full_line + "\n> ", self._status_commands(), 1)
+        self.assertIn("bottom_toolbar", placed)
+        self.assertNotIn("rprompt", placed)
+        self.assertTrue(callable(placed["bottom_toolbar"]))
+
+    def test_print_diff_is_coloured_when_pretty(self):
+        from rich.syntax import Syntax
+
+        io = self._io()
+        with patch.object(io.console, "print") as mock_print:
+            io.print_diff("-old\n+new\n")
+        self.assertIsInstance(mock_print.call_args[0][0], Syntax)
+
+    def test_print_diff_is_plain_when_not_pretty(self):
+        io = self._io(pretty=False)
+        with patch.object(io, "print") as mock_print:
+            io.print_diff("-old\n+new\n")
+        mock_print.assert_called_once_with("-old\n+new\n")
+
+    def test_waiting_spinner_shows_elapsed_time_only_for_waiting(self):
+        from aider.waiting import Spinner, WaitingSpinner
+
+        self.assertFalse(Spinner("x").show_elapsed)
+        self.assertTrue(WaitingSpinner("x").spinner.show_elapsed)
+
+    def test_status_label_is_not_repeated_when_message_already_names_it(self):
+        io = self._io(pretty=False)
+        with patch.object(io.console, "print") as mock_print:
+            io.tool_error("Error reading main.py: denied")
+            io.tool_warning("Warning: disk is slow")
+            io.tool_error("boom")
+        shown = [call[0][0].plain for call in mock_print.call_args_list]
+        self.assertEqual(shown[0].count("Error"), 1)
+        self.assertEqual(shown[1].count("Warning"), 1)
+        self.assertIn("Error: boom", shown[2])

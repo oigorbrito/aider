@@ -166,11 +166,6 @@ for more details.
 
 This is collection of python functions that compute various math functions.
 
-#### /help How do I use aider with ollama?
-
-Run `aider --model ollama/<ollama-model>`.
-See these docs for more info: https://aider.chat/docs/llms/ollama.html
-
 #### /code Add a function to calculate the factorial of a number
 
 Certainly! I'll add a function to calculate the factorial of a number. Here's the change:

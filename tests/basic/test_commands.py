@@ -2224,3 +2224,37 @@ class TestCommands(TestCase):
             )
             self.assertEqual(new_coder.done_messages, [{"role": "user", "content": "d1"}])
             self.assertEqual(new_coder.cur_messages, [{"role": "user", "content": "c1"}])
+
+
+class TestDiffRenderingByPlatform(TestCase):
+    """/diff (coloured terminal path): Windows uses the Rich view, POSIX keeps git's own path."""
+
+    def _commands(self):
+        coder = mock.MagicMock()
+        coder.pretty = True
+        coder.repo.get_head_commit_sha.return_value = "head123"
+        coder.commit_before_message = ["before456", "before456"]
+        coder.repo.diff_commits.return_value = "-old\n+new\n"
+        io = mock.MagicMock()
+        commands = Commands(io, coder)
+        return commands, io, coder
+
+    def test_windows_uses_coloured_renderer(self):
+        commands, io, coder = self._commands()
+        with (
+            mock.patch("aider.commands.platform.system", return_value="Windows"),
+            mock.patch("aider.commands.run_cmd") as run,
+        ):
+            commands.raw_cmd_diff("")
+        io.print_diff.assert_called_once_with("-old\n+new\n")
+        run.assert_not_called()
+
+    def test_posix_keeps_previous_git_path(self):
+        commands, io, coder = self._commands()
+        with (
+            mock.patch("aider.commands.platform.system", return_value="Linux"),
+            mock.patch("aider.commands.run_cmd") as run,
+        ):
+            commands.raw_cmd_diff("")
+        run.assert_called_once_with("git diff before456")
+        io.print_diff.assert_not_called()

@@ -19,7 +19,7 @@ import shtab
 from dotenv import dotenv_values
 from prompt_toolkit.enums import EditingMode
 
-from aider import __version__, auth, login_cli, models, urls, utils
+from aider import __version__, auth, endpoints, login_cli, models, urls, utils
 from aider.analytics import Analytics
 from aider.args import get_parser
 from aider.coders import Coder
@@ -670,8 +670,14 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
 
     # Handle deprecated model shortcut args
     handle_deprecated_model_args(args, io)
-    if args.openai_api_base:
-        os.environ["OPENAI_API_BASE"] = args.openai_api_base
+    try:
+        if args.openai_api_base:
+            endpoints.check_endpoint(args.openai_api_base, "--openai-api-base")
+            os.environ["OPENAI_API_BASE"] = args.openai_api_base
+        endpoints.check_environment(os.environ)
+    except endpoints.EndpointError as error:
+        io.tool_error(str(error))
+        return 1
     if args.openai_api_version:
         io.tool_warning(
             "--openai-api-version is deprecated, use --set-env OPENAI_API_VERSION=<value>"
@@ -859,6 +865,10 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
     except auth.AuthError as error:
         io.tool_error(str(error))
         analytics.event("exit", reason="ChatGPT sign-in missing for specified model")
+        return 1
+    except models.UnsupportedModelError as error:
+        io.tool_error(str(error))
+        analytics.event("exit", reason="Unsupported model")
         return 1
 
     # Check if deprecated remove_reasoning is set

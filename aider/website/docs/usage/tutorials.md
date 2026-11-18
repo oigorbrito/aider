@@ -18,7 +18,6 @@ Here are some tutorial videos made by aider users:
 - [Creating Games with AI from Start-To-End](https://youtu.be/sOd2YYZFMUs) -- AICodeKing
 - [Claude 3.5 and aider: Use AI Assistants to Build AI Apps](https://youtu.be/0hIisJ3xAdU) -- Coding the Future With AI
 - [Develop a Full-stack App Without Writing ANY Code](https://youtu.be/dzOWn8TI738) -- WorldofAI
-- [Generate Games with AI (w/ Local LLMs)](https://youtu.be/DjVJpGzQbSA) -- AICodeKing
 - [Aider tips and Example use](https://www.youtube.com/watch?v=OsChkvGGDgw) -- techfren
 - [Aider and Claude 3.5: Develop a Full-stack App Without Writing ANY Code!](https://www.youtube.com/watch?v=BtAqHsySdSY) -- Coding the Future With AI
 - [Generate application with just one prompt using Aider](https://www.youtube.com/watch?v=Y-_0VkMUiPc&t=78s) -- AICodeKing
