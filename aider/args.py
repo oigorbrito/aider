@@ -627,6 +627,27 @@ def get_parser(default_config_files, git_root):
         default=False,
     )
     group.add_argument(
+        "--login",
+        nargs="?",
+        const="",
+        metavar="PROVIDER",
+        help=(
+            "Sign in to a provider (browser or API key) and store the credential in"
+            " ~/.aider/auth.json, then exit. Without PROVIDER, you choose one."
+        ),
+    )
+    group.add_argument(
+        "--logout",
+        metavar="PROVIDER",
+        choices=["openrouter", "openai", "anthropic", "deepseek", "gemini"],
+        help="Remove the credential stored by --login for PROVIDER, then exit",
+    )
+    group.add_argument(
+        "--method",
+        choices=["browser", "key"],
+        help="With --login: sign in by browser (default when supported) or by API key",
+    )
+    group.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",

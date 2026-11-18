@@ -1113,12 +1113,45 @@ class TestMain(TestCase):
             self.assertIn("gemini", coder.main_model.name.lower())
             del os.environ["GEMINI_API_KEY"]
 
-            # Test no API keys - should offer OpenRouter OAuth
-            with patch("aider.onboarding.offer_openrouter_oauth") as mock_offer_oauth:
-                mock_offer_oauth.return_value = None  # Simulate user declining or failure
-                result = main(["--exit", "--yes"], input=DummyInput(), output=DummyOutput())
-                self.assertEqual(result, 1)  # Expect failure since no model could be selected
-                mock_offer_oauth.assert_called_once()
+            # Test no API keys - no automatic sign-in; the user is pointed to --login
+            result = main(["--exit", "--yes"], input=DummyInput(), output=DummyOutput())
+            self.assertEqual(result, 1)  # Expect failure since no model could be selected
+
+    def test_login_flag_runs_login_and_exits(self):
+        with GitTemporaryDirectory():
+            with patch("aider.main.run_login_command", return_value=0) as mock_login:
+                result = main(["--login", "openrouter"], input=DummyInput(), output=DummyOutput())
+                self.assertEqual(result, 0)
+                mock_login.assert_called_once_with("openrouter", None)
+
+    def test_logout_flag_runs_logout_and_exits(self):
+        with GitTemporaryDirectory():
+            with patch("aider.main.run_logout_command", return_value=0) as mock_logout:
+                result = main(["--logout", "openai"], input=DummyInput(), output=DummyOutput())
+                self.assertEqual(result, 0)
+                mock_logout.assert_called_once_with("openai")
+
+    def test_login_flag_passes_method(self):
+        with GitTemporaryDirectory():
+            with patch("aider.main.run_login_command", return_value=0) as mock_login:
+                main(
+                    ["--login", "openrouter", "--method", "key"],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                mock_login.assert_called_once_with("openrouter", "key")
+
+    def test_login_failure_exits_with_code_1(self):
+        from aider import auth
+
+        with GitTemporaryDirectory():
+            with patch("aider.main.auth.login_oauth", side_effect=auth.AuthError("timed out")):
+                result = main(
+                    ["--login", "openrouter", "--method", "browser"],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                self.assertEqual(result, 1)
 
     def test_model_precedence(self):
         with GitTemporaryDirectory():
@@ -1433,38 +1466,38 @@ class TestMain(TestCase):
             cwd_subdir = git_dir / "subdir"
             cwd_subdir.mkdir()
             cwd_env = cwd_subdir / ".env"
-            cwd_env.write_text("CWD_VAR=cwd_val\nSHARED_VAR=cwd_shared\n")
+            cwd_env.write_text("CWD_VAR=cwd_val\nSHARED_VAR=cwd_shared\nSHELL_WINS=dotenv\n")
 
             # Change to subdir
             original_cwd = os.getcwd()
             os.chdir(cwd_subdir)
 
             # Clear relevant env vars before test
-            for var in ["OAUTH_VAR", "SHARED_VAR", "GIT_VAR", "CWD_VAR"]:
+            for var in ["OAUTH_VAR", "SHARED_VAR", "GIT_VAR", "CWD_VAR", "SHELL_WINS"]:
                 if var in os.environ:
                     del os.environ[var]
+            # A variable set in the shell must beat every .env file.
+            os.environ["SHELL_WINS"] = "shell"
 
             with patch("pathlib.Path.home", return_value=fake_home):
                 loaded_files = load_dotenv_files(str(git_dir), None)
 
                 # Assert files were loaded in expected order (oauth first)
-                self.assertIn(str(oauth_keys_file.resolve()), loaded_files)
+                # The OAuth keys file is no longer read (phase 7 removes the login).
+                self.assertNotIn(str(oauth_keys_file.resolve()), loaded_files)
                 self.assertIn(str(git_root_env.resolve()), loaded_files)
                 self.assertIn(str(cwd_env.resolve()), loaded_files)
-                self.assertLess(
-                    loaded_files.index(str(oauth_keys_file.resolve())),
-                    loaded_files.index(str(git_root_env.resolve())),
-                )
                 self.assertLess(
                     loaded_files.index(str(git_root_env.resolve())),
                     loaded_files.index(str(cwd_env.resolve())),
                 )
 
-                # Assert environment variables reflect the override order
-                self.assertEqual(os.environ.get("OAUTH_VAR"), "oauth_val")
+                # Assert environment variables reflect the precedence rules
+                self.assertIsNone(os.environ.get("OAUTH_VAR"))
+                self.assertEqual(os.environ.get("SHELL_WINS"), "shell")
                 self.assertEqual(os.environ.get("GIT_VAR"), "git_val")
                 self.assertEqual(os.environ.get("CWD_VAR"), "cwd_val")
-                # SHARED_VAR should be overridden by the last loaded file (cwd .env)
+                # Among .env files the last loaded one wins (cwd .env)
                 self.assertEqual(os.environ.get("SHARED_VAR"), "cwd_shared")
 
             # Restore CWD

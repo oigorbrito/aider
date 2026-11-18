@@ -1,3 +1,4 @@
+import getpass
 import glob
 import os
 import re
@@ -13,12 +14,14 @@ from PIL import Image, ImageGrab
 from prompt_toolkit.completion import Completion, PathCompleter
 from prompt_toolkit.document import Document
 
-from aider import models, prompts, voice
+from aider import auth, login_cli, models, prompts, voice
+from aider.credential_store import CredentialStore
 from aider.editor import pipe_editor
 from aider.format_settings import format_settings
 from aider.help import Help, install_help_extra
 from aider.io import CommandCompletionException
 from aider.llm import litellm
+from aider.openrouter_login import LoginError
 from aider.repo import ANY_GIT_ERROR
 from aider.run_cmd import run_cmd
 from aider.scrape import Scraper, install_playwright
@@ -31,6 +34,40 @@ class SwitchCoder(Exception):
     def __init__(self, placeholder=None, **kwargs):
         self.kwargs = kwargs
         self.placeholder = placeholder
+
+
+# Example model names for each provider the user has signed in to (see /login).
+MODEL_EXAMPLES = {
+    "anthropic": "anthropic/claude-haiku-4-5",
+    "openai": "chatgpt/gpt-5.6-terra",
+}
+
+
+def signed_in_examples(store=None):
+    """Example model names for providers with a stored sign-in, in MODEL_EXAMPLES order."""
+    from aider.credential_store import CredentialStore, CredentialStoreError
+
+    try:
+        stored = set((store or CredentialStore()).list())
+    except (CredentialStoreError, RuntimeError, OSError):
+        return []
+    return [example for provider, example in MODEL_EXAMPLES.items() if provider in stored]
+
+
+def model_hints(search=False, store=None):
+    """Text shown when /model or /models is used without a name."""
+    examples = signed_in_examples(store)
+    if search:
+        lines = [
+            "Search model names with /models <text>, for example /models haiku or /models gpt."
+        ]
+    else:
+        lines = ["Switch model with /model <name>."]
+    if examples:
+        lines.append("Signed in, so you can try: " + ", ".join(examples) + ".")
+    else:
+        lines.append("No sign-in saved yet. Run /login to sign in with your browser.")
+    return "\n".join(lines)
 
 
 class Commands:
@@ -91,6 +128,7 @@ class Commands:
         if not model_name:
             announcements = "\n".join(self.coder.get_announcements())
             self.io.tool_output(announcements)
+            self.io.tool_output(model_hints())
             return
 
         model = models.Model(
@@ -214,7 +252,7 @@ class Commands:
         if args:
             models.print_matching_models(self.io, args)
         else:
-            self.io.tool_output("Please provide a partial model name to search for.")
+            self.io.tool_output(model_hints(search=True))
 
     def cmd_web(self, args, return_content=False):
         "Scrape a webpage, convert to markdown and send in a message"
@@ -549,6 +587,57 @@ class Commands:
                 " /clear to make space)"
             )
         self.io.tool_output(f"{cost_pad}{fmt(limit)} tokens max context window size")
+
+    def cmd_login(self, args):
+        "Sign in to a provider by browser or API key, saved for later sessions"
+        parts = args.split()
+        provider = parts[0] if parts else None
+        method = parts[1] if len(parts) > 1 else None
+        store = CredentialStore()
+        interaction = login_cli.TerminalInteraction(
+            output=self.io.tool_output, ask=self.io.prompt_ask
+        )
+        try:
+            provider, method = login_cli.login_provider(
+                provider,
+                method,
+                store,
+                interaction,
+                os.environ,
+                getpass.getpass,
+                ask=self.io.prompt_ask,
+                output=self.io.tool_output,
+            )
+        except (auth.AuthError, LoginError) as error:
+            self.io.tool_error(f"Sign-in failed: {error}")
+            return
+        login_cli.use_now(provider, store, os.environ)
+        self.io.tool_output(
+            f"Signed in to {provider} with {method}. Stored in {store.path}. "
+            "Use /model to switch to its models."
+        )
+
+    def cmd_logout(self, args):
+        "Remove the stored credential for a provider. Environment variables are unchanged"
+        provider = args.strip()
+        if not provider:
+            self.io.tool_error("Usage: /logout PROVIDER")
+            return
+        store = CredentialStore()
+        try:
+            removed = login_cli.logout_provider(provider, store)
+        except auth.AuthError as error:
+            self.io.tool_error(str(error))
+            return
+        if removed:
+            self.io.tool_output(
+                f"Removed the stored credential for {provider}."
+                " Environment variables are unchanged."
+            )
+        else:
+            self.io.tool_output(
+                f"No stored credential for {provider}. Environment variables are unchanged."
+            )
 
     def cmd_undo(self, args):
         "Undo the last git commit if it was done by aider"
