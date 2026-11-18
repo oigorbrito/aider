@@ -1,3 +1,4 @@
+import getpass
 import json
 import os
 import re
@@ -15,7 +16,7 @@ except ImportError:
 
 import importlib_resources
 import shtab
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from prompt_toolkit.enums import EditingMode
 
 from aider import __version__, models, urls, utils
@@ -25,13 +26,16 @@ from aider.coders import Coder
 from aider.coders.base_coder import UnknownEditFormat
 from aider.commands import Commands, SwitchCoder
 from aider.copypaste import ClipboardWatcher
+from aider import auth, login_cli
+from aider.credential_store import CredentialStore, CredentialStoreError
 from aider.deprecated import handle_deprecated_model_args
 from aider.format_settings import format_settings, scrub_sensitive_info
 from aider.history import ChatSummary
 from aider.io import InputOutput
 from aider.llm import litellm  # noqa: F401; properly init litellm on launch
 from aider.models import ModelSettings
-from aider.onboarding import offer_openrouter_oauth, select_default_model
+from aider.openrouter_login import LoginError
+from aider.onboarding import select_default_model
 from aider.repo import ANY_GIT_ERROR, GitRepo
 from aider.report import report_uncaught_exceptions
 from aider.versioncheck import check_version, install_from_main_branch, install_upgrade
@@ -366,24 +370,24 @@ def load_dotenv_files(git_root, dotenv_fname, encoding="utf-8"):
         dotenv_fname,
     )
 
-    # Explicitly add the OAuth keys file to the beginning of the list
-    oauth_keys_file = Path.home() / ".aider" / "oauth-keys.env"
-    if oauth_keys_file.exists():
-        # Insert at the beginning so it's loaded first (and potentially overridden)
-        dotenv_files.insert(0, str(oauth_keys_file.resolve()))
-        # Remove duplicates if it somehow got included by generate_search_path_list
-        dotenv_files = list(dict.fromkeys(dotenv_files))
-
+    # Shell variables set before aider starts win over every .env file (D1b).
+    # Among .env files the later one still wins, as documented in dotenv.md.
+    # Stored credentials are applied after this, in main(), and win over both.
+    shell_names = set(os.environ)
+    values = {}
     loaded = []
     for fname in dotenv_files:
         try:
             if Path(fname).exists():
-                load_dotenv(fname, override=True, encoding=encoding)
+                values.update(dotenv_values(fname, encoding=encoding))
                 loaded.append(fname)
         except OSError as e:
             print(f"OSError loading {fname}: {e}")
         except Exception as e:
             print(f"Error loading {fname}: {e}")
+    for name, value in values.items():
+        if name not in shell_names and value is not None:
+            os.environ[name] = value
     return loaded
 
 
@@ -448,6 +452,40 @@ def sanity_check_repo(repo, io):
     return False
 
 
+def run_login_command(provider=None, method=None):
+    """`aider --login`: sign in from the terminal, store the credential, return an exit code."""
+    store = CredentialStore()
+    try:
+        provider, method = login_cli.login_provider(
+            provider,
+            method,
+            store,
+            login_cli.TerminalInteraction(),
+            os.environ,
+            getpass.getpass,
+        )
+    except (auth.AuthError, LoginError) as error:
+        print(f"Sign-in failed: {error}", file=sys.stderr)
+        return 1
+    print(f"Signed in to {provider} with {method}. Stored in {store.path}.")
+    return 0
+
+
+def run_logout_command(provider):
+    """Remove the stored credential for a provider. Environment variables stay as they are."""
+    store = CredentialStore()
+    try:
+        removed = login_cli.logout_provider(provider, store)
+    except auth.AuthError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    if not removed:
+        print(f"No stored credential for {provider}. Environment variables are unchanged.")
+        return 0
+    print(f"Removed the stored credential for {provider}. Environment variables are unchanged.")
+    return 0
+
+
 def main(argv=None, input=None, output=None, force_git_root=None, return_coder=False):
     report_uncaught_exceptions()
 
@@ -499,6 +537,18 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
 
     # Load the .env file specified in the arguments
     loaded_dotenvs = load_dotenv_files(git_root, args.env_file, args.encoding)
+
+    # Stored credentials win over .env files and shell variables (D1).
+    try:
+        auth.apply_stored_keys(CredentialStore(), os.environ)
+    except CredentialStoreError as error:
+        print(f"Warning: {error}", file=sys.stderr)
+
+    if args.login is not None:
+        return run_login_command(args.login or None, args.method)
+
+    if args.logout is not None:
+        return run_logout_command(args.logout)
 
     # Parse again to include any arguments that might have been defined in .env
     args = parser.parse_args(argv)
@@ -788,44 +838,25 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
             f"The specified model '{args.model}' requires an OpenRouter API key, which was not"
             " found."
         )
-        # Attempt OAuth flow because the specific model needs it
-        if offer_openrouter_oauth(io, analytics):
-            # OAuth succeeded, the key should now be in os.environ.
-            # Check if the key is now present after the flow.
-            if os.environ.get("OPENROUTER_API_KEY"):
-                io.tool_output(
-                    "OpenRouter successfully connected."
-                )  # Inform user connection worked
-            else:
-                # This case should ideally not happen if offer_openrouter_oauth succeeded
-                # but check defensively.
-                io.tool_error(
-                    "OpenRouter authentication seemed successful, but the key is still missing."
-                )
-                analytics.event(
-                    "exit",
-                    reason="OpenRouter key missing after successful OAuth for specified model",
-                )
-                return 1
-        else:
-            # OAuth failed or was declined by the user
-            io.tool_error(
-                f"Unable to proceed without an OpenRouter API key for model '{args.model}'."
-            )
-            io.offer_url(urls.models_and_keys, "Open documentation URL for more info?")
-            analytics.event(
-                "exit",
-                reason="OpenRouter key missing for specified model and OAuth failed/declined",
-            )
-            return 1
+        io.tool_error(
+            f"Unable to proceed without an OpenRouter API key for model '{args.model}'."
+            " Run `aider --login openrouter` to sign in."
+        )
+        analytics.event("exit", reason="OpenRouter key missing for specified model")
+        return 1
 
-    main_model = models.Model(
-        args.model,
-        weak_model=args.weak_model,
-        editor_model=args.editor_model,
-        editor_edit_format=args.editor_edit_format,
-        verbose=args.verbose,
-    )
+    try:
+        main_model = models.Model(
+            args.model,
+            weak_model=args.weak_model,
+            editor_model=args.editor_model,
+            editor_edit_format=args.editor_edit_format,
+            verbose=args.verbose,
+        )
+    except auth.AuthError as error:
+        io.tool_error(str(error))
+        analytics.event("exit", reason="ChatGPT sign-in missing for specified model")
+        return 1
 
     # Check if deprecated remove_reasoning is set
     if main_model.remove_reasoning is not None:
