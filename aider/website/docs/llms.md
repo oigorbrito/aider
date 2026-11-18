@@ -30,14 +30,6 @@ Aider works with a number of **free** API providers:
 - [OpenRouter offers free access to many models](https://openrouter.ai/models/?q=free), with limitations on daily usage.
 - Google's [Gemini 2.5 Pro Exp](/docs/llms/gemini.html) works very well with aider.
 
-## Local models
-{: .no_toc }
-
-Aider can work also with local models, for example using [Ollama](/docs/llms/ollama.html).
-It can also access
-local models that provide an
-[Open AI compatible API](/docs/llms/openai-compat.html).
-
 ## Use a capable model
 {: .no_toc }
 
