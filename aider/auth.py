@@ -140,7 +140,9 @@ def apply_stored_keys(store, environ, report=None):
         try:
             resolved = resolve(provider_id, store, environ)
         except AuthError as error:
-            # Startup must not fail. The reason is reported, not hidden.
+            # A stored sign-in owns the provider (FineCode rule): when it cannot be
+            # used, the environment key must not be used silently in its place.
+            environ.pop(PROVIDERS[provider_id].env_var, None)
             if report is not None:
                 report(str(error))
             continue

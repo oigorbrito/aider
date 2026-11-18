@@ -19,6 +19,7 @@ from PIL import Image
 from aider import __version__
 from aider.dump import dump  # noqa: F401
 from aider.llm import litellm
+from aider import endpoints
 from aider.oauth_runtime import (
     anthropic_oauth_adjustments,
     chatgpt_completion_model,
@@ -334,12 +335,29 @@ class ModelInfoManager:
 model_info_manager = ModelInfoManager()
 
 
+# Providers that run models on the user's own machine. aider does not support them.
+LOCAL_RUNTIME_PROVIDERS = ("ollama", "ollama_chat", "lm_studio", "llamafile", "vllm", "hosted_vllm")
+
+
+class UnsupportedModelError(ValueError):
+    """The model cannot be used by aider. The message is safe to show to the user."""
+
+
+def check_supported_model(name):
+    provider = (name or "").split("/", 1)[0] if "/" in (name or "") else ""
+    if provider in LOCAL_RUNTIME_PROVIDERS:
+        raise UnsupportedModelError(
+            f"'{name}' runs a model on this machine, and aider only supports cloud providers."
+        )
+
+
 class Model(ModelSettings):
     def __init__(
         self, model, weak_model=None, editor_model=None, editor_edit_format=None, verbose=False
     ):
         # Map any alias to its canonical name
         model = MODEL_ALIASES.get(model, model)
+        check_supported_model(model)
 
         self.name = model
 
@@ -943,9 +961,6 @@ class Model(ModelSettings):
             return
         return "r1" in name or "reasoner" in name
 
-    def is_ollama(self):
-        return self.name.startswith("ollama/") or self.name.startswith("ollama_chat/")
-
     def github_copilot_token_to_open_ai_key(self, extra_headers):
         # check to see if there's an openai api key
         # If so, check to see if it's expire
@@ -1024,9 +1039,7 @@ class Model(ModelSettings):
             kwargs["tool_choice"] = {"type": "function", "function": {"name": function["name"]}}
         if self.extra_params:
             kwargs.update(self.extra_params)
-        if self.is_ollama() and "num_ctx" not in kwargs:
-            num_ctx = int(self.token_count(messages) * 1.25) + 8192
-            kwargs["num_ctx"] = num_ctx
+        endpoints.check_endpoint(kwargs.get("api_base"), "api_base in the model settings")
         key = json.dumps(kwargs, sort_keys=True).encode()
 
         # dump(kwargs)
