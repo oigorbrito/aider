@@ -121,10 +121,13 @@ def _renewed(provider, store, credential):
     return renewed
 
 
-def apply_stored_keys(store, environ):
+def apply_stored_keys(store, environ, report=None):
     """Copy stored keys into environ so litellm sees them (D9).
 
     Only stored credentials are copied. Environment values are already there.
+    A stored sign-in that cannot be used (for example an expired token that
+    cannot be renewed) is skipped, and report(message) is called with the
+    reason, so the user sees what to do instead of a generic missing-key error.
     Returns the environment variable names that were set.
     """
     applied = []
@@ -136,8 +139,11 @@ def apply_stored_keys(store, environ):
             continue  # A ChatGPT token is not an OpenAI API key; models.py uses the auth file.
         try:
             resolved = resolve(provider_id, store, environ)
-        except AuthError:
-            continue  # Startup must not fail; the model step asks for a new login.
+        except AuthError as error:
+            # Startup must not fail. The reason is reported, not hidden.
+            if report is not None:
+                report(str(error))
+            continue
         if resolved and resolved.source == SOURCE_STORED:
             name = PROVIDERS[provider_id].env_var
             environ[name] = resolved.api_key

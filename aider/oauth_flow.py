@@ -35,6 +35,7 @@ __all__ = [
     "new_state",
     "parse_pasted",
     "post_request",
+    "user_agent_for",
 ]
 
 EXCHANGE_TIMEOUT_SECONDS = 30
@@ -55,6 +56,19 @@ def new_state(nbytes=16):
     return secrets.token_hex(nbytes)
 
 
+# Cloudflare blocks the default Python User-Agent on platform.claude.com (HTTP 403),
+# so each provider gets the User-Agent its own CLI sends.
+USER_AGENTS = {
+    "platform.claude.com": "claude-cli/2.1.280",
+    "auth.openai.com": "codex_cli_rs/0.0.0",
+}
+DEFAULT_USER_AGENT = "aider"
+
+
+def user_agent_for(url):
+    return USER_AGENTS.get(urllib.parse.urlsplit(url).hostname or "", DEFAULT_USER_AGENT)
+
+
 def post_request(url, body, form):
     """POST a form or JSON body and return the parsed JSON object.
 
@@ -70,7 +84,11 @@ def post_request(url, body, form):
     request = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": content_type, "Accept": "application/json"},
+        headers={
+            "Content-Type": content_type,
+            "Accept": "application/json",
+            "User-Agent": user_agent_for(url),
+        },
         method="POST",
     )
     try:
@@ -105,6 +123,11 @@ def parse_pasted(text, expected_state=None):
     if "://" in value or "code=" in value:
         query = urllib.parse.urlsplit(value).query if "://" in value else value.lstrip("?")
         params = urllib.parse.parse_qs(query)
+        if "response_type" in params:
+            raise LoginError(
+                "That is the sign-in link, not the redirect URL. After you authorize in the"
+                " browser, paste the address bar URL that starts with http://localhost."
+            )
         code = params.get("code", [""])[0]
         state = params.get("state", [None])[0]
     elif "#" in value:

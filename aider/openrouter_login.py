@@ -439,4 +439,3 @@ class OpenRouterOAuth:
 def credential_from_key(key):
     """Pi credential shape for an OpenRouter key. The key never expires by itself."""
     return {"type": "oauth", "access": key, "refresh": "", "expires": 9007199254740991}
-

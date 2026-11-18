@@ -20,8 +20,8 @@ from aider.editor import pipe_editor
 from aider.format_settings import format_settings
 from aider.help import Help, install_help_extra
 from aider.io import CommandCompletionException
-from aider.openrouter_login import LoginError
 from aider.llm import litellm
+from aider.openrouter_login import LoginError
 from aider.repo import ANY_GIT_ERROR
 from aider.run_cmd import run_cmd
 from aider.scrape import Scraper, install_playwright
@@ -34,6 +34,40 @@ class SwitchCoder(Exception):
     def __init__(self, placeholder=None, **kwargs):
         self.kwargs = kwargs
         self.placeholder = placeholder
+
+
+# Example model names for each provider the user has signed in to (see /login).
+MODEL_EXAMPLES = {
+    "anthropic": "anthropic/claude-haiku-4-5",
+    "openai": "chatgpt/gpt-5.6-terra",
+}
+
+
+def signed_in_examples(store=None):
+    """Example model names for providers with a stored sign-in, in MODEL_EXAMPLES order."""
+    from aider.credential_store import CredentialStore, CredentialStoreError
+
+    try:
+        stored = set((store or CredentialStore()).list())
+    except (CredentialStoreError, RuntimeError, OSError):
+        return []
+    return [example for provider, example in MODEL_EXAMPLES.items() if provider in stored]
+
+
+def model_hints(search=False, store=None):
+    """Text shown when /model or /models is used without a name."""
+    examples = signed_in_examples(store)
+    if search:
+        lines = [
+            "Search model names with /models <text>, for example /models haiku or /models gpt."
+        ]
+    else:
+        lines = ["Switch model with /model <name>."]
+    if examples:
+        lines.append("Signed in, so you can try: " + ", ".join(examples) + ".")
+    else:
+        lines.append("No sign-in saved yet. Run /login to sign in with your browser.")
+    return "\n".join(lines)
 
 
 class Commands:
@@ -94,6 +128,7 @@ class Commands:
         if not model_name:
             announcements = "\n".join(self.coder.get_announcements())
             self.io.tool_output(announcements)
+            self.io.tool_output(model_hints())
             return
 
         model = models.Model(
@@ -217,7 +252,7 @@ class Commands:
         if args:
             models.print_matching_models(self.io, args)
         else:
-            self.io.tool_output("Please provide a partial model name to search for.")
+            self.io.tool_output(model_hints(search=True))
 
     def cmd_web(self, args, return_content=False):
         "Scrape a webpage, convert to markdown and send in a message"
