@@ -58,7 +58,9 @@ def model_hints(search=False, store=None):
     """Text shown when /model or /models is used without a name."""
     examples = signed_in_examples(store)
     if search:
-        lines = ["Search model names with /models <text>, for example /models haiku or /models gpt."]
+        lines = [
+            "Search model names with /models <text>, for example /models haiku or /models gpt."
+        ]
     else:
         lines = ["Switch model with /model <name>."]
     if examples:

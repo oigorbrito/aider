@@ -14,7 +14,9 @@ def test_hints_without_sign_in_point_to_login(tmp_path):
 
 def test_hints_list_examples_only_for_signed_in_providers(tmp_path):
     store = _store(tmp_path)
-    store.modify("anthropic", lambda current: {"type": "oauth", "access": "a", "refresh": "r", "expires": 1})
+    store.modify(
+        "anthropic", lambda current: {"type": "oauth", "access": "a", "refresh": "r", "expires": 1}
+    )
     text = commands.model_hints(store=store)
     assert "anthropic/claude-haiku-4-5" in text
     assert "chatgpt/gpt-5.6-terra" not in text
@@ -37,7 +39,18 @@ def test_default_model_prefers_a_signed_in_provider(tmp_path):
 
     store = _store(tmp_path)
     assert onboarding.signed_in_default_model(store) is None
-    store.modify("openai", lambda current: {"type": "oauth", "access": "a", "refresh": "r", "expires": 1, "accountId": "x"})
+    store.modify(
+        "openai",
+        lambda current: {
+            "type": "oauth",
+            "access": "a",
+            "refresh": "r",
+            "expires": 1,
+            "accountId": "x",
+        },
+    )
     assert onboarding.signed_in_default_model(store) == "chatgpt/gpt-5.6-terra"
-    store.modify("anthropic", lambda current: {"type": "oauth", "access": "a", "refresh": "r", "expires": 1})
+    store.modify(
+        "anthropic", lambda current: {"type": "oauth", "access": "a", "refresh": "r", "expires": 1}
+    )
     assert onboarding.signed_in_default_model(store) == "anthropic/claude-haiku-4-5"

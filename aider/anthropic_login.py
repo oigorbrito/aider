@@ -149,4 +149,3 @@ class AnthropicOAuth:
 
     def to_auth(self, credential):
         return {"apiKey": credential["access"]}
-

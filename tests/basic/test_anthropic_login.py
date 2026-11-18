@@ -178,7 +178,6 @@ def test_callback_listener_reports_provider_denial():
         listener.close()
 
 
-
 def test_token_requests_send_the_claude_cli_user_agent():
     # platform.claude.com returns 403 to the default Python User-Agent (Cloudflare).
     from aider.oauth_flow import user_agent_for
