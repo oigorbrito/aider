@@ -113,8 +113,10 @@ class OpenAICodexOAuth:
             {
                 "type": "auth_url",
                 "url": url,
-                "instructions": "Complete login in your browser. If the browser is on another"
-                " machine, paste the final redirect URL here.",
+                "instructions": (
+                    "Complete login in your browser. If the browser is on another"
+                    " machine, paste the final redirect URL here."
+                ),
             }
         )
         if listener is not None:
