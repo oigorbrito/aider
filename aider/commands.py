@@ -20,8 +20,8 @@ from aider.editor import pipe_editor
 from aider.format_settings import format_settings
 from aider.help import Help, install_help_extra
 from aider.io import CommandCompletionException
-from aider.openrouter_login import LoginError
 from aider.llm import litellm
+from aider.openrouter_login import LoginError
 from aider.repo import ANY_GIT_ERROR
 from aider.run_cmd import run_cmd
 from aider.scrape import Scraper, install_playwright

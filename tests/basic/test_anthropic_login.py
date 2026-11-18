@@ -4,7 +4,12 @@ import urllib.request
 import pytest
 
 from aider import auth
-from aider.anthropic_login import AnthropicOAuth, CLIENT_ID, COPY_CODE_REDIRECT_URI, TOKEN_URL
+from aider.anthropic_login import (
+    CLIENT_ID,
+    COPY_CODE_REDIRECT_URI,
+    TOKEN_URL,
+    AnthropicOAuth,
+)
 from aider.credential_store import CredentialStore
 from aider.oauth_flow import CallbackListener, LoginError
 
