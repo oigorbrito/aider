@@ -23,6 +23,12 @@ class TerminalInteraction:
             self._output(f"Open this URL to sign in:\n{event['url']}")
         elif event.get("type") == "progress":
             self._output(event["message"])
+        elif event.get("type") == "device_code":
+            self._output(
+                f"Open {event['verificationUri']} on any device and enter the code"
+                f" {event['userCode']}. The code expires in"
+                f" {event['expiresInSeconds'] // 60} minutes."
+            )
 
     def prompt(self, message):
         try:

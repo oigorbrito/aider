@@ -35,6 +35,7 @@ __all__ = [
     "new_state",
     "parse_pasted",
     "post_request",
+    "post_status",
     "user_agent_for",
 ]
 
@@ -105,6 +106,42 @@ def post_request(url, body, form):
     if not isinstance(parsed, dict):
         raise LoginError(f"{_host(url)} returned an invalid response.")
     return parsed
+
+
+def post_status(url, body, form):
+    """POST like post_request, but return (status, parsed_body) instead of raising on HTTP errors.
+
+    Device-code polling needs 403 and 404 as "still pending", not as failures.
+    Network errors still raise LoginError.
+    """
+    if form:
+        data = urllib.parse.urlencode(body).encode("utf-8")
+        content_type = "application/x-www-form-urlencoded"
+    else:
+        data = json.dumps(body).encode("utf-8")
+        content_type = "application/json"
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": content_type,
+            "Accept": "application/json",
+            "User-Agent": user_agent_for(url),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=EXCHANGE_TIMEOUT_SECONDS) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as error:
+        status, raw = error.code, error.read()
+    except (urllib.error.URLError, OSError) as error:
+        raise LoginError(f"Could not reach {_host(url)}: {error.__class__.__name__}.") from None
+    try:
+        parsed = json.loads(raw or b"{}")
+    except (ValueError, UnicodeDecodeError):
+        parsed = {}
+    return status, parsed if isinstance(parsed, dict) else {}
 
 
 def _host(url):

@@ -32,6 +32,7 @@ from aider.oauth_flow import (
     new_state,
     post_request,
 )
+from aider.oauth_flow import post_status as post_status_request
 
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
@@ -79,11 +80,109 @@ def _credential(data):
     }
 
 
+DEVICE_USER_CODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode"
+DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token"
+DEVICE_VERIFICATION_URI = "https://auth.openai.com/codex/device"
+DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
+DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60
+DEFAULT_DEVICE_INTERVAL_SECONDS = 5
+MINIMUM_DEVICE_INTERVAL_SECONDS = 1
+SLOW_DOWN_INCREMENT_SECONDS = 5
+
+
+class DeviceCodeUnavailable(LoginError):
+    """The server does not offer device-code login. The caller falls back to pasting."""
+
+
+def start_device_code(post_status):
+    status, body = post_status(DEVICE_USER_CODE_URL, {"client_id": CLIENT_ID}, False)
+    if status == 404:
+        raise DeviceCodeUnavailable("OpenAI device-code login is not enabled for this server.")
+    if status != 200:
+        raise LoginError(f"OpenAI device-code request failed (HTTP {status}).")
+    device_auth_id = body.get("device_auth_id")
+    user_code = body.get("user_code")
+    if not isinstance(device_auth_id, str) or not isinstance(user_code, str):
+        raise LoginError("OpenAI's device-code response is missing the code.")
+    interval = body.get("interval", DEFAULT_DEVICE_INTERVAL_SECONDS)
+    try:
+        interval = float(interval)  # the server sends it as text: "5"
+    except (TypeError, ValueError):
+        raise LoginError("OpenAI's device-code response has an invalid interval.") from None
+    if interval < 0:
+        raise LoginError("OpenAI's device-code response has an invalid interval.")
+    return {"device_auth_id": device_auth_id, "user_code": user_code, "interval": interval}
+
+
+def poll_device_code(device, post_status, sleep, now, timeout=DEVICE_CODE_TIMEOUT_SECONDS):
+    """Poll until the user approves (RFC 8628). Returns (authorization_code, code_verifier).
+
+    403 and 404 mean still pending. `slow_down` raises the interval by 5 seconds.
+    """
+    deadline = now() + timeout
+    interval = max(MINIMUM_DEVICE_INTERVAL_SECONDS, device["interval"])
+    slow_down_seen = False
+    while now() < deadline:
+        status, body = post_status(
+            DEVICE_TOKEN_URL,
+            {"device_auth_id": device["device_auth_id"], "user_code": device["user_code"]},
+            False,
+        )
+        if status == 200:
+            code = body.get("authorization_code")
+            verifier = body.get("code_verifier")
+            complete = all(isinstance(v, str) and v for v in (code, verifier))
+            if not complete:
+                raise LoginError("OpenAI's device-code approval response is incomplete.")
+            return code, verifier
+        error = body.get("error")
+        error_code = error.get("code") if isinstance(error, dict) else error
+        if status in (403, 404) or error_code == "deviceauth_authorization_pending":
+            pass
+        elif error_code == "slow_down":
+            slow_down_seen = True
+            interval += SLOW_DOWN_INCREMENT_SECONDS
+        else:
+            raise LoginError(f"OpenAI device-code login failed (HTTP {status}).")
+        remaining = deadline - now()
+        if remaining <= 0:
+            break
+        sleep(min(interval, remaining))
+    if slow_down_seen:
+        raise LoginError(
+            "Device login timed out after slow_down responses. This is often caused by clock"
+            " drift in a VM or WSL. Sync the clock and try again."
+        )
+    raise LoginError("Device login timed out. Run the command again.")
+
+
 class OpenAICodexOAuth:
     name = "OpenAI (ChatGPT Plus/Pro)"
 
-    def login(self, interaction, environ=None, open_browser=webbrowser.open, post=post_request):
+    def login(
+        self,
+        interaction,
+        environ=None,
+        open_browser=webbrowser.open,
+        post=post_request,
+        post_status=post_status_request,
+        sleep=time.sleep,
+        now=time.monotonic,
+    ):
         environ = os.environ if environ is None else environ
+        if is_headless(environ):
+            # FineCode's headless method: the user approves on another device.
+            try:
+                return self._login_device(interaction, post, post_status, sleep, now)
+            except DeviceCodeUnavailable:
+                interaction.notify(
+                    {
+                        "type": "progress",
+                        "message": (
+                            "Device login is not offered here; paste the redirect URL instead."
+                        ),
+                    }
+                )
         verifier, challenge = generate_pkce()
         state = new_state()
 
@@ -142,6 +241,34 @@ class OpenAICodexOAuth:
                 "code": code,
                 "code_verifier": verifier,
                 "redirect_uri": REDIRECT_URI,
+            },
+            True,
+        )
+        return _credential(data)
+
+    def _login_device(self, interaction, post, post_status, sleep, now):
+        device = start_device_code(post_status)
+        interaction.notify(
+            {
+                "type": "device_code",
+                "userCode": device["user_code"],
+                "verificationUri": DEVICE_VERIFICATION_URI,
+                "intervalSeconds": device["interval"],
+                "expiresInSeconds": DEVICE_CODE_TIMEOUT_SECONDS,
+            }
+        )
+        code, verifier = poll_device_code(device, post_status, sleep, now)
+        interaction.notify(
+            {"type": "progress", "message": "Exchanging authorization code for tokens..."}
+        )
+        data = post(
+            TOKEN_URL,
+            {
+                "grant_type": "authorization_code",
+                "client_id": CLIENT_ID,
+                "code": code,
+                "code_verifier": verifier,
+                "redirect_uri": DEVICE_REDIRECT_URI,
             },
             True,
         )
