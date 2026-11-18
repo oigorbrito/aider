@@ -29,6 +29,7 @@ class Spinner:
     """
 
     last_frame_idx = 0  # Class variable to store the last frame index
+    show_elapsed = False  # Append whole seconds since start, e.g. "(12s)"
 
     def __init__(self, text: str, width: int = 7):
         self.text = text
@@ -128,7 +129,10 @@ class Spinner:
         if max_spinner_width < 0:  # Handle extremely narrow terminals
             max_spinner_width = 0
 
-        current_text_payload = f" {self.text}"
+        label = self.text
+        if self.show_elapsed:
+            label = f"{self.text} ({int(now - self.start_time)}s)"
+        current_text_payload = f" {label}"
         line_to_display = f"{frame_str}{current_text_payload}"
 
         # Truncate the line if it's too long for the console width
@@ -173,6 +177,7 @@ class WaitingSpinner:
 
     def __init__(self, text: str = "Waiting for LLM", delay: float = 0.15):
         self.spinner = Spinner(text)
+        self.spinner.show_elapsed = True
         self.delay = delay
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._spin, daemon=True)
