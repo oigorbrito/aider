@@ -9,7 +9,6 @@ from http.server import HTTPServer
 import pytest
 
 from aider import openrouter_login as ol
-from aider.credential_store import CredentialStore
 from aider.openrouter_login import (
     AlreadyClaimed,
     LoginError,
