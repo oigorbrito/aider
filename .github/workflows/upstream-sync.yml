@@ -64,6 +64,7 @@ jobs:
             git push --force --quiet origin "refs/remotes/upstream-pr/${n}:refs/heads/upstream-pr/${n}"               || { echo "skipped #${n}: push refused"; skipped=$((skipped + 1)); }
           done < open-prs.txt
           echo "mirror branches skipped: ${skipped}"
+          echo "${skipped}" > mirror-skipped.count
           # Remove mirror branches of PRs that are no longer open.
           git ls-remote --heads origin 'refs/heads/upstream-pr/*' \
             | awk '{sub("refs/heads/upstream-pr/", "", $2); print $2}' | sort > mirrored.txt
@@ -88,7 +89,9 @@ jobs:
             echo "# Upstream: ${UPSTREAM_REPO}"
             echo ""
             echo "Last mirrored commit on \`upstream-main\`: \`${sha}\` at ${now}."
-            echo "Open PR branches: \`upstream-pr/NUMBER\`. Nothing is merged automatically; \`main\` is not changed."
+            echo "PR branches mirrored: $(( $(wc -l < open-prs.txt) - $(cat mirror-skipped.count) )) of $(wc -l < open-prs.txt) open PRs, as \`upstream-pr/NUMBER\`."
+            echo "Not mirrored: $(cat mirror-skipped.count) (their changes touch .github/workflows, which the default token cannot push)."
+            echo "Nothing is merged automatically; \`main\` is not changed."
             echo ""
             echo "## Open pull requests ($(wc -l < items-prs.md))"
             cat items-prs.md
