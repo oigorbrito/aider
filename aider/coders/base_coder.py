@@ -1473,6 +1473,7 @@ class Coder:
 
                     if not should_retry:
                         self.mdstream = None
+                        self.fatal_error = err  # --message exits non-zero (see main)
                         self.check_and_open_urls(err, ex_info.description)
                         break
 
@@ -1505,6 +1506,7 @@ class Coder:
                         )
                 except Exception as err:
                     self.mdstream = None
+                    self.fatal_error = err  # --message exits non-zero (see main)
                     lines = traceback.format_exception(type(err), err, err.__traceback__)
                     self.io.tool_warning("".join(lines))
                     self.io.tool_error(str(err))

@@ -539,7 +539,11 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
 
     # Stored credentials win over .env files and shell variables (D1).
     try:
-        auth.apply_stored_keys(CredentialStore(), os.environ)
+        auth.apply_stored_keys(
+            CredentialStore(),
+            os.environ,
+            report=lambda message: print(f"Warning: {message}", file=sys.stderr),
+        )
     except CredentialStoreError as error:
         print(f"Warning: {error}", file=sys.stderr)
 
@@ -1160,6 +1164,9 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
             coder.run(with_message=args.message)
         except SwitchCoder:
             pass
+        if getattr(coder, "fatal_error", None) is not None:
+            analytics.event("exit", reason="Fatal error in --message")
+            return 1
         analytics.event("exit", reason="Completed --message")
         return
 
