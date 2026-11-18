@@ -94,3 +94,24 @@ def test_logout_provider_reports_whether_anything_was_removed(tmp_path):
     store.modify("openai", lambda current: {"type": "api_key", "key": "k"})
     assert login_cli.logout_provider("openai", store) is True
     assert login_cli.logout_provider("openai", store) is False
+
+
+def test_use_now_does_not_expose_chatgpt_token_as_openai_api_key(tmp_path):
+    # F1: the ChatGPT access token must not reach api.openai.com as an API key.
+    store = _store(tmp_path)
+    store.modify(
+        "openai",
+        lambda current: {
+            "type": "oauth",
+            "access": "chatgpt-token",
+            "refresh": "r",
+            "expires": 9007199254740991,
+            "accountId": "acc_1",
+        },
+    )
+    environ = {"OPENAI_API_KEY": "sk-env"}
+    login_cli.use_now("openai", store, environ)
+    assert environ["OPENAI_API_KEY"] == "sk-env"
+    environ = {}
+    login_cli.use_now("openai", store, environ)
+    assert "OPENAI_API_KEY" not in environ

@@ -68,7 +68,14 @@ def login_provider(
 
 
 def use_now(provider, store, environ):
-    """Make a just-stored key visible to litellm in this running process (D9)."""
+    """Make a just-stored key visible to litellm in this running process (D9).
+
+    A ChatGPT sign-in is not an OpenAI API key, so it is not exposed as one; the
+    chatgpt/ models read the credential store themselves (oauth_runtime).
+    """
+    stored = store.read(provider)
+    if provider == "openai" and stored and stored.get("type") == "oauth":
+        return
     resolved = auth.resolve(provider, store, environ)
     if resolved is not None:
         environ[auth.get_provider(provider).env_var] = resolved.api_key

@@ -160,3 +160,44 @@ def test_renewal_uses_a_token_another_process_already_renewed(tmp_path, monkeypa
 
     assert result == fresh
     assert calls == []
+
+
+def _chatgpt_credential(expires):
+    return {
+        "type": "oauth",
+        "access": "chatgpt-access",
+        "refresh": "r",
+        "expires": expires,
+        "accountId": "acc_1",
+    }
+
+
+def test_apply_stored_keys_reports_broken_chatgpt_sign_in_at_startup(tmp_path, monkeypatch):
+    # F2: an expired ChatGPT sign-in whose renewal fails must be reported, not silent.
+    store = _store(tmp_path)
+    store.modify("openai", lambda current: _chatgpt_credential(expires=1))
+
+    def refuse(credential):
+        raise auth.LoginError("Token request to auth.openai.com failed (HTTP 400).")
+
+    monkeypatch.setattr(auth.PROVIDERS["openai"].oauth, "refresh", refuse)
+    messages = []
+    environ = {"OPENAI_API_KEY": "sk-env"}
+    applied = auth.apply_stored_keys(store, environ, report=messages.append)
+    assert applied == []
+    assert environ["OPENAI_API_KEY"] == "sk-env"  # API-key precedence unchanged
+    assert len(messages) == 1
+    assert "aider --login openai" in messages[0]
+
+
+def test_apply_stored_keys_renews_chatgpt_sign_in_without_reporting(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    store.modify("openai", lambda current: _chatgpt_credential(expires=1))
+    renewed = _chatgpt_credential(expires=9007199254740991)
+    monkeypatch.setattr(auth.PROVIDERS["openai"].oauth, "refresh", lambda credential: renewed)
+    messages = []
+    environ = {}
+    assert auth.apply_stored_keys(store, environ, report=messages.append) == []
+    assert messages == []
+    assert store.read("openai") == renewed
+    assert "OPENAI_API_KEY" not in environ

@@ -158,7 +158,14 @@ def apply_stored_keys(store, environ, report=None):
             continue
         stored = store.read(provider_id)
         if provider_id == "openai" and stored and stored.get("type") == "oauth":
-            continue  # A ChatGPT token is not an OpenAI API key; models.py uses the auth file.
+            # A ChatGPT token is not an OpenAI API key; models.py uses the auth file.
+            # It is still renewed here, so a broken sign-in is reported at startup (F2).
+            try:
+                resolve(provider_id, store, environ)
+            except AuthError as error:
+                if report is not None:
+                    report(str(error))
+            continue
         try:
             resolved = resolve(provider_id, store, environ)
         except AuthError as error:
