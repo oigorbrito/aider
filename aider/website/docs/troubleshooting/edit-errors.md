@@ -41,18 +41,8 @@ They are the strong and capable models.
 Weaker models
 are more prone to
 disobeying the system prompt instructions.
-Most local models are just barely capable of working with aider,
+Weaker models may be just barely capable of working with aider,
 so editing errors are probably unavoidable.
-
-## Local models: context window and quantization
-
-Be especially careful about the
-[Ollama context window](https://aider.chat/docs/llms/ollama.html#setting-the-context-window-size)
-when working with local models.
-It defaults to be very small and silently discards data if you exceed it.
-
-Local models which have been quantized are more likely to have editing problems
-because they are not capable enough to follow aider's system prompts.
 
 ## Try the whole edit format
 
