@@ -74,7 +74,7 @@ def get_parser(default_config_files, git_root):
         help="Specify the Anthropic API key",
     )
     group.add_argument(
-        "--openai-api-base",  # removed: aider uses only cloud providers (see main)
+        "--openai-api-base",
         help="Specify the api base url",
     )
     group.add_argument(

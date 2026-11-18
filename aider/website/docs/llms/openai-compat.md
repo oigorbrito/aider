@@ -7,6 +7,8 @@ nav_order: 500
 
 Aider can connect to any LLM which is accessible via an OpenAI compatible API endpoint.
 
+The endpoint must be a cloud service. aider refuses an endpoint that points to this machine (a loopback, private or link-local address, or `localhost`), in `--openai-api-base`, `OPENAI_API_BASE`, other `*_API_BASE` variables and model settings.
+
 First, install aider:
 
 {% include install.md %}

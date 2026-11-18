@@ -19,6 +19,7 @@ from PIL import Image
 from aider import __version__
 from aider.dump import dump  # noqa: F401
 from aider.llm import litellm
+from aider import endpoints
 from aider.oauth_runtime import (
     anthropic_oauth_adjustments,
     chatgpt_completion_model,
@@ -1038,6 +1039,7 @@ class Model(ModelSettings):
             kwargs["tool_choice"] = {"type": "function", "function": {"name": function["name"]}}
         if self.extra_params:
             kwargs.update(self.extra_params)
+        endpoints.check_endpoint(kwargs.get("api_base"), "api_base in the model settings")
         key = json.dumps(kwargs, sort_keys=True).encode()
 
         # dump(kwargs)

@@ -42,16 +42,3 @@ def test_main_refuses_a_local_model_without_any_network_call(monkeypatch, capsys
     )
     assert status == 1
     assert "runs a model on this machine" in capsys.readouterr().out
-
-
-def test_main_refuses_the_removed_endpoint_flag(capsys):
-    status = main(
-        [
-            "--openai-api-base", "http://127.0.0.1:1234/v1",
-            "--no-git", "--no-check-update", "--yes", "--exit",
-        ],
-        input=DummyInput(),
-        output=DummyOutput(),
-    )
-    assert status == 1
-    assert "--openai-api-base was removed" in capsys.readouterr().out
