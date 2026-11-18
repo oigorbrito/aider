@@ -21,7 +21,11 @@ def test_choose_rejects_unknown_answer():
 def test_login_provider_api_key_stores_credential(tmp_path):
     store = _store(tmp_path)
     provider, method = login_cli.login_provider(
-        "openai", "key", store, login_cli.TerminalInteraction(output=lambda m: None), {},
+        "openai",
+        "key",
+        store,
+        login_cli.TerminalInteraction(output=lambda m: None),
+        {},
         getpass_fn=lambda prompt: "sk-typed",
     )
     assert (provider, method) == ("openai", "key")
@@ -31,8 +35,12 @@ def test_login_provider_api_key_stores_credential(tmp_path):
 def test_login_provider_single_method_needs_no_question(tmp_path):
     asked = []
     login_cli.login_provider(
-        "deepseek", None, _store(tmp_path), login_cli.TerminalInteraction(output=lambda m: None),
-        {}, getpass_fn=lambda prompt: "sk-typed",
+        "deepseek",
+        None,
+        _store(tmp_path),
+        login_cli.TerminalInteraction(output=lambda m: None),
+        {},
+        getpass_fn=lambda prompt: "sk-typed",
         ask=lambda q: asked.append(q) or "",
     )
     assert asked == []
@@ -46,8 +54,13 @@ def test_login_provider_asks_only_provider_and_defaults_to_browser(tmp_path, mon
         auth, "login_oauth", lambda provider, store, interaction, environ: started.append(provider)
     )
     provider, method = login_cli.login_provider(
-        None, None, _store(tmp_path), login_cli.TerminalInteraction(output=lambda m: None), {},
-        getpass_fn=lambda prompt: "sk-typed", ask=lambda q: next(answers),
+        None,
+        None,
+        _store(tmp_path),
+        login_cli.TerminalInteraction(output=lambda m: None),
+        {},
+        getpass_fn=lambda prompt: "sk-typed",
+        ask=lambda q: next(answers),
         output=lambda m: None,
     )
     assert (provider, method) == ("anthropic", "browser")
@@ -56,8 +69,14 @@ def test_login_provider_asks_only_provider_and_defaults_to_browser(tmp_path, mon
 
 def test_login_provider_key_needs_explicit_method(tmp_path):
     provider, method = login_cli.login_provider(
-        "openai", "key", _store(tmp_path), login_cli.TerminalInteraction(output=lambda m: None),
-        {}, getpass_fn=lambda prompt: "sk-typed", ask=lambda q: "", output=lambda m: None,
+        "openai",
+        "key",
+        _store(tmp_path),
+        login_cli.TerminalInteraction(output=lambda m: None),
+        {},
+        getpass_fn=lambda prompt: "sk-typed",
+        ask=lambda q: "",
+        output=lambda m: None,
     )
     assert (provider, method) == ("openai", "key")
 
