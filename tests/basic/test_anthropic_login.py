@@ -177,3 +177,21 @@ def test_callback_listener_reports_provider_denial():
     finally:
         listener.close()
 
+
+
+def test_token_requests_send_the_claude_cli_user_agent():
+    # platform.claude.com returns 403 to the default Python User-Agent (Cloudflare).
+    from aider.oauth_flow import user_agent_for
+
+    assert user_agent_for("https://platform.claude.com/v1/oauth/token").startswith("claude-cli/")
+    assert user_agent_for("https://auth.openai.com/oauth/token").startswith("codex_cli_rs/")
+    assert user_agent_for("https://openrouter.ai/api/v1/auth/keys") == "aider"
+
+
+def test_pasting_the_sign_in_link_is_rejected_not_read_as_a_code():
+    from aider.oauth_flow import parse_pasted
+
+    link = "https://claude.ai/oauth/authorize?code=true&response_type=code&state=abc"
+    with pytest.raises(LoginError, match="sign-in link"):
+        parse_pasted(link)
+    assert parse_pasted("http://localhost:53692/callback?code=real&state=abc") == ("real", "abc")
