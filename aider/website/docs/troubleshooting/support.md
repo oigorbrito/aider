@@ -51,26 +51,6 @@ The ability to use both global and repo-specific .env files allows for flexible 
 </div>
 <div class="chat-transcript" markdown="1">
 
-#### /help can i use local LLMs?
-
-Yes, you can use local LLMs with Aider. Here's a summary of the options:
-
-1. Ollama: Aider supports using local models through Ollama.
-
-2. OpenAI-compatible API: Aider can access local models that provide an OpenAI-compatible API.
-
-3. Other local models: Aider uses the LiteLLM package to connect to various LLM providers, which may include options for running models locally.
-
-However, it's important to note that Aider works best with more capable models. Less capable models may have difficulty properly returning "code edits," which could result in Aider not being able to edit your files and commit changes effectively.
-
-For more detailed information on using local LLMs and connecting to various models, you might want to check out these relevant documentation pages:
-
-- https://aider.chat/docs/llms.html
-- https://aider.chat/docs/llms/ollama.html
-- https://aider.chat/docs/llms/openai-compat.html
-
-Keep in mind that the performance and capabilities of local LLMs may vary depending on the specific model and your hardware resources.
-
 </div>
 
 
