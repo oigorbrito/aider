@@ -101,6 +101,8 @@ def prepare_chatgpt_auth(store, environ):
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         json.dump(payload, handle)
     environ["CHATGPT_TOKEN_DIR"] = str(directory)
+    # FineCode sends originator "pi" to the ChatGPT backend; litellm defaults to codex_cli_rs.
+    environ.setdefault("CHATGPT_ORIGINATOR", "pi")
     return path
 
 
