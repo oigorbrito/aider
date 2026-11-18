@@ -1,0 +1,71 @@
+name: Sync upstream
+
+# Mirrors Aider-AI/aider into this repository without merging anything:
+# - the upstream main branch is pushed to the branch `upstream-main`;
+# - a single issue (label `upstream-report`) lists the upstream open PRs and issues.
+# The `main` branch is never changed here. Merging is always a manual decision.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: Aider-AI/aider
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror upstream main to upstream-main
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream main --no-tags
+          # Fast-forward only: a push that is not a fast-forward fails and the job reports it.
+          git push origin "refs/remotes/upstream/main:refs/heads/upstream-main"
+
+      - name: Update the upstream report issue
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse --short refs/remotes/upstream/main)
+          {
+            echo "# Upstream: ${UPSTREAM_REPO}"
+            echo ""
+            echo "Last mirrored commit on \`upstream-main\`: \`${sha}\` at $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo "Nothing is merged automatically. \`main\` is not changed."
+            echo ""
+            echo "## Open pull requests (up to 150)"
+            gh pr list --repo "$UPSTREAM_REPO" --state open --limit 150 \
+              --json number,title,author,updatedAt,url \
+              --jq '.[] | "- [#\(.number)](\(.url)) \(.title) (@\(.author.login), updated \(.updatedAt[0:10]))"'
+            echo ""
+            echo "## Open issues (up to 150)"
+            gh issue list --repo "$UPSTREAM_REPO" --state open --limit 150 \
+              --json number,title,author,updatedAt,url \
+              --jq '.[] | "- [#\(.number)](\(.url)) \(.title) (@\(.author.login), updated \(.updatedAt[0:10]))"'
+          } > report.md
+
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label upstream-report \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            gh label create upstream-report --repo "$GITHUB_REPOSITORY" --color 0366d6 \
+              --description "Upstream report" --force
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Upstream PRs and issues" \
+              --label upstream-report --body-file report.md
+          else
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file report.md
+          fi
