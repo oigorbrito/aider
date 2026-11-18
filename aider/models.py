@@ -334,12 +334,29 @@ class ModelInfoManager:
 model_info_manager = ModelInfoManager()
 
 
+# Providers that run models on the user's own machine. aider does not support them.
+LOCAL_RUNTIME_PROVIDERS = ("ollama", "ollama_chat", "lm_studio", "llamafile", "vllm", "hosted_vllm")
+
+
+class UnsupportedModelError(ValueError):
+    """The model cannot be used by aider. The message is safe to show to the user."""
+
+
+def check_supported_model(name):
+    provider = (name or "").split("/", 1)[0] if "/" in (name or "") else ""
+    if provider in LOCAL_RUNTIME_PROVIDERS:
+        raise UnsupportedModelError(
+            f"'{name}' runs a model on this machine, and aider only supports cloud providers."
+        )
+
+
 class Model(ModelSettings):
     def __init__(
         self, model, weak_model=None, editor_model=None, editor_edit_format=None, verbose=False
     ):
         # Map any alias to its canonical name
         model = MODEL_ALIASES.get(model, model)
+        check_supported_model(model)
 
         self.name = model
 

@@ -671,7 +671,11 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
     # Handle deprecated model shortcut args
     handle_deprecated_model_args(args, io)
     if args.openai_api_base:
-        os.environ["OPENAI_API_BASE"] = args.openai_api_base
+        io.tool_error(
+            "--openai-api-base was removed. aider uses only cloud providers with their own"
+            " endpoints. Use --model with a cloud provider instead."
+        )
+        return 1
     if args.openai_api_version:
         io.tool_warning(
             "--openai-api-version is deprecated, use --set-env OPENAI_API_VERSION=<value>"
@@ -859,6 +863,10 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
     except auth.AuthError as error:
         io.tool_error(str(error))
         analytics.event("exit", reason="ChatGPT sign-in missing for specified model")
+        return 1
+    except models.UnsupportedModelError as error:
+        io.tool_error(str(error))
+        analytics.event("exit", reason="Unsupported model")
         return 1
 
     # Check if deprecated remove_reasoning is set
