@@ -34,6 +34,27 @@ def check_openrouter_tier(api_key):
         return True
 
 
+# Model used by default for each browser sign-in, in order of preference.
+SIGNED_IN_DEFAULTS = (
+    ("anthropic", "anthropic/claude-haiku-4-5"),
+    ("openai", "chatgpt/gpt-5.6-terra"),
+)
+
+
+def signed_in_default_model(store=None):
+    """Return a default model for a stored sign-in, or None."""
+    from aider.credential_store import CredentialStore, CredentialStoreError
+
+    try:
+        stored = set((store or CredentialStore()).list())
+    except (CredentialStoreError, RuntimeError, OSError):
+        return None
+    for provider, model in SIGNED_IN_DEFAULTS:
+        if provider in stored:
+            return model
+    return None
+
+
 def try_to_select_default_model():
     """
     Attempts to select a default model based on available API keys.
@@ -42,6 +63,11 @@ def try_to_select_default_model():
     Returns:
         The name of the selected model, or None if no suitable default is found.
     """
+    # A provider the user signed in to (aider --login or /login) comes first.
+    signed_in = signed_in_default_model()
+    if signed_in:
+        return signed_in
+
     # Special handling for OpenRouter
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
     if openrouter_key:

@@ -49,7 +49,7 @@ def signed_in_examples(store=None):
 
     try:
         stored = set((store or CredentialStore()).list())
-    except CredentialStoreError:
+    except (CredentialStoreError, RuntimeError, OSError):
         return []
     return [example for provider, example in MODEL_EXAMPLES.items() if provider in stored]
 
