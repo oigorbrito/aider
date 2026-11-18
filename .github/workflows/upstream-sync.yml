@@ -57,10 +57,13 @@ jobs:
             done < "$chunk"
             git fetch --no-tags upstream "${specs[@]}"
           done
-          # Force is allowed only inside the upstream-pr/ mirror namespace.
-          if [ -s open-prs.txt ]; then
-            git push --force origin 'refs/remotes/upstream-pr/*:refs/heads/upstream-pr/*'
-          fi
+          # Push one branch at a time. The default token cannot push branches that change
+          # .github/workflows, so those PRs are skipped and the rest still go through.
+          skipped=0
+          while read -r n; do
+            git push --force --quiet origin "refs/remotes/upstream-pr/${n}:refs/heads/upstream-pr/${n}"               || { echo "skipped #${n}: push refused"; skipped=$((skipped + 1)); }
+          done < open-prs.txt
+          echo "mirror branches skipped: ${skipped}"
           # Remove mirror branches of PRs that are no longer open.
           git ls-remote --heads origin 'refs/heads/upstream-pr/*' \
             | awk '{sub("refs/heads/upstream-pr/", "", $2); print $2}' | sort > mirrored.txt
