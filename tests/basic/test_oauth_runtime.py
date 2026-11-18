@@ -348,3 +348,20 @@ def test_send_completion_routes_chatgpt_through_responses_and_writes_auth(tmp_pa
 
     assert calls[0]["model"] == "chatgpt/responses/gpt-5-codex"
     assert (tmp_path / "chatgpt" / "auth.json").exists()
+
+
+def test_chatgpt_originator_matches_finecode_by_default(tmp_path, monkeypatch):
+    store = CredentialStore(tmp_path / "auth.json")
+    future = int(time.time()) + 3600
+    store.modify(
+        "openai",
+        lambda current: {"type": "oauth", "access": _jwt_with_exp(future), "refresh": "r",
+                         "expires": future * 1000, "accountId": "acc"},
+    )
+    environ = {"AIDER_CHATGPT_TOKEN_DIR": str(tmp_path / "c")}
+    oauth_runtime.prepare_chatgpt_auth(store, environ)
+    assert environ["CHATGPT_ORIGINATOR"] == "pi"
+
+    user_choice = {"AIDER_CHATGPT_TOKEN_DIR": str(tmp_path / "c"), "CHATGPT_ORIGINATOR": "mine"}
+    oauth_runtime.prepare_chatgpt_auth(store, user_choice)
+    assert user_choice["CHATGPT_ORIGINATOR"] == "mine"

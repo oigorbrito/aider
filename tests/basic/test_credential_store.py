@@ -138,3 +138,44 @@ def test_default_path_is_under_home_aider(monkeypatch, tmp_path):
 
 def test_env_name_for_provider():
     assert env_name_for_provider("openrouter") == "OPENROUTER_API_KEY"
+
+
+def test_file_lock_times_out_when_another_holder_keeps_it(tmp_path):
+    from aider.credential_store import CredentialStoreError
+
+    store = CredentialStore(tmp_path / "auth.json")
+    with store._file_lock(timeout=5):
+        with pytest.raises(CredentialStoreError, match="Another aider process"):
+            with store._file_lock(timeout=0.3):
+                pass
+
+
+def test_modify_waits_for_another_process_to_release_the_lock(tmp_path):
+    import subprocess
+    import sys
+    import time
+
+    path = tmp_path / "auth.json"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "from aider.credential_store import CredentialStore\n"
+            "store = CredentialStore(Path(sys.argv[1]))\n"
+            "with store._file_lock(timeout=10):\n"
+            "    print('locked', flush=True)\n"
+            "    time.sleep(2)\n",
+            str(path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout.readline().strip() == "locked"
+    started = time.monotonic()
+    CredentialStore(path).modify("openai", lambda current: {"type": "api_key", "key": "sk-x"})
+    waited = time.monotonic() - started
+    holder.wait(timeout=30)
+    assert waited >= 1.0, f"modify did not wait for the other process ({waited:.2f}s)"
+    assert CredentialStore(path).read("openai") == {"type": "api_key", "key": "sk-x"}

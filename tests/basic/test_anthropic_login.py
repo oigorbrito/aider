@@ -199,3 +199,31 @@ def test_pasting_the_sign_in_link_is_rejected_not_read_as_a_code():
     with pytest.raises(LoginError, match="sign-in link"):
         parse_pasted(link)
     assert parse_pasted("http://localhost:53692/callback?code=real&state=abc") == ("real", "abc")
+
+
+def test_failed_renewal_never_falls_back_to_the_environment_key(tmp_path, monkeypatch):
+    # FineCode: no silent env fallback after a failed refresh. aider must not use
+    # ANTHROPIC_API_KEY (for example from a .env file) in place of a stored sign-in.
+    store = CredentialStore(tmp_path / "auth.json")
+    store.modify(
+        "anthropic",
+        lambda current: {
+            "type": "oauth",
+            "access": "sk-ant-oat01-old",
+            "refresh": "r-old",
+            "expires": 1,
+        },
+    )
+    monkeypatch.setattr(
+        auth.get_provider("anthropic").oauth,
+        "refresh",
+        lambda credential: (_ for _ in ()).throw(LoginError("refused")),
+    )
+    environ = {"ANTHROPIC_API_KEY": "sk-ant-api03-from-env-file"}
+    reports = []
+
+    applied = auth.apply_stored_keys(store, environ, report=reports.append)
+
+    assert applied == []
+    assert "ANTHROPIC_API_KEY" not in environ
+    assert reports and "aider --login anthropic" in reports[0]

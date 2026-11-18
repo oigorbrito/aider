@@ -131,3 +131,27 @@ def test_logout_without_stored_credential_returns_false(tmp_path):
 def test_logout_unknown_provider_is_an_auth_error(tmp_path):
     with pytest.raises(auth.AuthError):
         auth.logout("nope", _store(tmp_path))
+
+
+def test_renewal_uses_a_token_another_process_already_renewed(tmp_path, monkeypatch):
+    # The caller holds an expired copy; the file already has a fresh token from another
+    # process. The provider must not be called again (refresh tokens may rotate).
+    import time
+
+    store = _store(tmp_path)
+    fresh = {
+        "type": "oauth",
+        "access": "fresh",
+        "refresh": "r-new",
+        "expires": int(time.time() * 1000) + 3_600_000,
+    }
+    store.modify("anthropic", lambda current: fresh)
+    provider = auth.get_provider("anthropic")
+    calls = []
+    monkeypatch.setattr(provider.oauth, "refresh", lambda credential: calls.append(credential))
+    stale = {"type": "oauth", "access": "old", "refresh": "r-old", "expires": 1}
+
+    result = auth._renewed(provider, store, stale)
+
+    assert result == fresh
+    assert calls == []
