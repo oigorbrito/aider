@@ -1,0 +1,122 @@
+name: Sync upstream
+
+# Watches Aider-AI/aider without merging anything:
+# - upstream main is pushed to the branch upstream-main;
+# - every open upstream PR is mirrored to a branch upstream-pr/NUMBER
+#   (the upstream-pr/ namespace is a mirror only; closed PRs are removed from it);
+# - the open upstream PRs and issues are listed in report issues (label upstream-report),
+#   split into pages so nothing is cut off.
+# main is never changed here. Merging is always a manual decision.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: Aider-AI/aider
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror upstream main to upstream-main
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream main --no-tags
+          # Fast-forward only: a push that is not a fast-forward fails and the job reports it.
+          git push origin "refs/remotes/upstream/main:refs/heads/upstream-main"
+
+      - name: Mirror open upstream PRs to upstream-pr/NUMBER
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${UPSTREAM_REPO}/pulls?state=open&per_page=100" \
+            --jq '.[].number' | sort -n > open-prs.txt
+          echo "open upstream PRs: $(wc -l < open-prs.txt)"
+          # Fetch the PR heads in chunks, so each command line stays short.
+          split -l 100 open-prs.txt chunk_
+          for chunk in chunk_*; do
+            specs=()
+            while read -r n; do
+              specs+=("+refs/pull/${n}/head:refs/remotes/upstream-pr/${n}")
+            done < "$chunk"
+            git fetch --no-tags upstream "${specs[@]}"
+          done
+          # Force is allowed only inside the upstream-pr/ mirror namespace.
+          if [ -s open-prs.txt ]; then
+            git push --force origin 'refs/remotes/upstream-pr/*:refs/heads/upstream-pr/*'
+          fi
+          # Remove mirror branches of PRs that are no longer open.
+          git ls-remote --heads origin 'refs/heads/upstream-pr/*' \
+            | awk '{sub("refs/heads/upstream-pr/", "", $2); print $2}' | sort > mirrored.txt
+          sort open-prs.txt > open-sorted.txt
+          comm -23 mirrored.txt open-sorted.txt > stale.txt
+          while read -r n; do
+            [ -n "$n" ] && git push origin --delete "upstream-pr/${n}"
+          done < stale.txt
+
+      - name: Update the upstream report issues
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse --short refs/remotes/upstream/main)
+          now=$(date -u '+%Y-%m-%d %H:%M UTC')
+          gh api --paginate "repos/${UPSTREAM_REPO}/pulls?state=open&per_page=100" \
+            --jq '.[] | "- [#\(.number)](\(.html_url)) \(.title[0:120]) (@\(.user.login), updated \(.updated_at[0:10]))"' \
+            > items-prs.md
+          gh api --paginate "repos/${UPSTREAM_REPO}/issues?state=open&per_page=100" \
+            --jq '.[] | select(has("pull_request") | not) | "- [#\(.number)](\(.html_url)) \(.title[0:120]) (@\(.user.login), updated \(.updated_at[0:10]))"' \
+            > items-issues.md
+          {
+            echo "# Upstream: ${UPSTREAM_REPO}"
+            echo ""
+            echo "Last mirrored commit on \`upstream-main\`: \`${sha}\` at ${now}."
+            echo "Open PR branches: \`upstream-pr/NUMBER\`. Nothing is merged automatically; \`main\` is not changed."
+            echo ""
+            echo "## Open pull requests ($(wc -l < items-prs.md))"
+            cat items-prs.md
+            echo ""
+            echo "## Open issues ($(wc -l < items-issues.md))"
+            cat items-issues.md
+          } > all.md
+          rm -f page_*
+          split -l 250 -d -a 2 all.md page_
+          pages=$(ls page_* | wc -l)
+
+          gh label create upstream-report --repo "$GITHUB_REPOSITORY" --color 0366d6 \
+            --description "Upstream report" --force
+          mapfile -t existing < <(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label upstream-report --state open --json number --jq 'sort_by(.number)[].number')
+
+          i=0
+          for page in page_*; do
+            title="Upstream PRs and issues ($((i + 1))/${pages})"
+            if [ "$i" -lt "${#existing[@]}" ]; then
+              gh issue edit "${existing[$i]}" --repo "$GITHUB_REPOSITORY" \
+                --title "$title" --body-file "$page"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+                --label upstream-report --body-file "$page"
+            fi
+            i=$((i + 1))
+          done
+          # Close report issues left over from a longer previous report.
+          while [ "$i" -lt "${#existing[@]}" ]; do
+            gh issue close "${existing[$i]}" --repo "$GITHUB_REPOSITORY" \
+              --comment "Superseded by the current upstream report."
+            i=$((i + 1))
+          done
