@@ -100,25 +100,47 @@ def resolve(provider_id, store, environ):
     return None
 
 
-def _renewed(provider, store, credential):
-    """Refresh an expired OAuth credential and store the new one (Pi rule).
-
-    A credential without a refresh token (OpenRouter keys) is returned as is.
-    """
+def _needs_renewal(credential):
     expires = credential.get("expires")
     if not credential.get("refresh") or not isinstance(expires, (int, float)):
+        return False
+    return expires <= time.time() * 1000 + RENEW_MARGIN_MS
+
+
+def _renewed(provider, store, credential):
+    """Refresh an expired OAuth credential and store the new one (FineCode rule).
+
+    The check runs again under the store's file lock. If another process has
+    already renewed the sign-in, its token is used and the provider is not
+    called again. Refresh tokens may rotate, so a second refresh could invalidate
+    the first. A credential without a refresh token (OpenRouter keys) is returned as is.
+    """
+    if not _needs_renewal(credential):
         return credential
-    if expires > time.time() * 1000 + RENEW_MARGIN_MS:
-        return credential
+    result = {}
+
+    def renew_under_lock(current):
+        if current is None or current.get("type") != "oauth":
+            return current  # logged out meanwhile
+        if not _needs_renewal(current):
+            result["credential"] = current  # renewed by another process
+            return current
+        renewed = provider.oauth.refresh(current)
+        result["credential"] = renewed
+        return renewed
+
     try:
-        renewed = provider.oauth.refresh(credential)
+        store.modify(provider.id, renew_under_lock)
     except LoginError:
         raise AuthError(
             f"Saved {provider.name} sign-in expired and could not be renewed."
             f" Run aider --login {provider.id} again."
         ) from None
-    store.modify(provider.id, lambda current: renewed)
-    return renewed
+    if "credential" not in result:
+        raise AuthError(
+            f"The saved {provider.name} sign-in was removed. Run aider --login {provider.id}."
+        )
+    return result["credential"]
 
 
 def apply_stored_keys(store, environ, report=None):

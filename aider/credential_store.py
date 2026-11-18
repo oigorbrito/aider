@@ -26,11 +26,21 @@ Limits:
   processes the last writer wins, which is acceptable for one interactive user.
 """
 
+import contextlib
 import json
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
+
+try:  # POSIX
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
+
+LOCK_TIMEOUT_SECONDS = 30.0
 
 CREDENTIAL_FILE_NAME = "auth.json"
 FILE_MODE = 0o600
@@ -97,14 +107,55 @@ class CredentialStore:
         with self._lock:
             return sorted(self._load())
 
+    @contextlib.contextmanager
+    def _file_lock(self, timeout=LOCK_TIMEOUT_SECONDS):
+        """Exclusive lock shared by every aider process that uses this file.
+
+        Waits up to `timeout` seconds, then raises CredentialStoreError. The
+        lock file is separate from auth.json, so replacing auth.json does not
+        drop the lock.
+        """
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, FILE_MODE)
+        deadline = time.monotonic() + timeout
+        acquired = False
+        try:
+            while True:
+                try:
+                    if fcntl is not None:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    else:
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise CredentialStoreError(
+                            "Another aider process is updating the sign-in. Try again in a moment."
+                        ) from None
+                    time.sleep(0.05)
+            yield
+        finally:
+            try:
+                if acquired:  # only release a lock this call actually holds
+                    if fcntl is not None:
+                        fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    else:
+                        os.lseek(descriptor, 0, os.SEEK_SET)
+                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            finally:
+                os.close(descriptor)
+
     def modify(self, provider, fn):
-        """Read-modify-write one provider under the lock.
+        """Read-modify-write one provider under the thread and file locks.
 
         fn receives the current credential (or None) and returns the new one,
         or None to remove the entry. Returns the credential that is stored
         afterwards. If fn raises, nothing is written.
         """
-        with self._lock:
+        with self._lock, self._file_lock():
             data = self._load()
             updated = fn(data.get(provider))
             if updated is None:
