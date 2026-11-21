@@ -31,6 +31,7 @@ from aider.dump import dump  # noqa: F401
 from aider.io import InputOutput
 
 BENCHMARK_DNAME = Path(os.environ.get("AIDER_BENCHMARK_DIR", "tmp.benchmarks"))
+RUN_INFO_FNAME = ".aider.run.json"
 
 EXERCISES_DIR_DEFAULT = "polyglot-benchmark"
 
@@ -158,6 +159,50 @@ def resolve_dirname(dirname, use_single_prior, make_new):
     return dirname
 
 
+def filter_by_keywords(dnames, keywords):
+    """Keep each exercise dir once if its name contains any keyword (like pytest -k)."""
+    return [dn for dn in dnames if any(keyword in dn for keyword in keywords)]
+
+
+def shuffle_with_seed(dnames, seed):
+    dnames = list(dnames)
+    random.Random(seed).shuffle(dnames)
+    return dnames
+
+
+def read_run_info(dirname):
+    fname = Path(dirname) / RUN_INFO_FNAME
+    if not fname.exists():
+        return None
+    try:
+        return json.loads(fname.read_text())
+    except JSONDecodeError:
+        return None
+
+
+def resolve_seed(dirname, seed):
+    """Use --seed if given, else the seed of an earlier run in this dir, else a new random one."""
+    if seed is not None:
+        return seed
+    info = read_run_info(dirname) or {}
+    if info.get("seed") is not None:
+        return info["seed"]
+    return random.randrange(2**32)
+
+
+def write_run_info(dirname, seed, exercises_commit):
+    Path(dirname).mkdir(parents=True, exist_ok=True)
+    info = {"seed": seed, "exercises_commit": exercises_commit}
+    (Path(dirname) / RUN_INFO_FNAME).write_text(json.dumps(info, indent=4))
+
+
+def get_exercises_commit(exercises_path):
+    try:
+        return git.Repo(exercises_path).head.object.hexsha[:7]
+    except (git.exc.InvalidGitRepositoryError, git.exc.NoSuchPathError):
+        return None
+
+
 @app.command()
 def main(
     dirnames: Optional[List[str]] = typer.Argument(None, help="Directory names"),
@@ -214,6 +259,11 @@ def main(
     ),
     exercises_dir: str = typer.Option(
         EXERCISES_DIR_DEFAULT, "--exercises-dir", help="Directory with exercise files"
+    ),
+    seed: Optional[int] = typer.Option(
+        None,
+        "--seed",
+        help="Seed for the exercise order. Default: reuse the run's seed, else a new random one.",
     ),
 ):
     repo = git.Repo(search_parent_directories=True)
@@ -337,10 +387,12 @@ def main(
             return 1
 
     if keywords:
-        keywords = keywords.split(",")
-        test_dnames = [dn for dn in test_dnames for keyword in keywords if keyword in dn]
+        test_dnames = filter_by_keywords(test_dnames, keywords.split(","))
 
-    random.shuffle(test_dnames)
+    seed = resolve_seed(dirname, seed)
+    test_dnames = shuffle_with_seed(test_dnames, seed)
+    print(f"Exercise order seed: {seed}")
+    write_run_info(dirname, seed, get_exercises_commit(original_dname))
     if num_tests > 0:
         test_dnames = test_dnames[:num_tests]
 
@@ -607,6 +659,12 @@ def summarize_results(dirname, stats_languages=None):
 
     print(f"  date: {date}")
     print("  versions:", ",".join(versions))
+
+    run_info = read_run_info(dirname) or {}
+    if run_info.get("seed") is not None:
+        print(f"  seed: {run_info['seed']}")
+    if run_info.get("exercises_commit"):
+        print(f"  exercises_commit: {run_info['exercises_commit']}")
 
     res.avg_duration = res.duration / res.completed_tests
     print(f"  seconds_per_case: {res.avg_duration:.1f}")

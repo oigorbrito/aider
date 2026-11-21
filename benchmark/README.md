@@ -81,7 +81,8 @@ You can run `./benchmark/benchmark.py --help` for a list of all the arguments, b
 - `--edit-format` is the name of the edit format, same as you would pass directly to `aider`. When working with an experimental LLM, I recommend starting with `whole`
 - `--threads` specifies how many exercises to benchmark in parallel. Start with a single thread if you are working out the kinks on your benchmarking setup or working with a new model, etc. Once you are getting reliable results, you can speed up the process by running with more threads. 10 works well against the OpenAI APIs.
 - `--num-tests` specifies how many of the tests to run before stopping. This is another way to start gently as you debug your benchmarking setup.
-- `--keywords` filters the tests to run to only the ones whose name match the supplied argument (similar to `pytest -k xxxx`).
+- `--keywords` filters the tests to run to only the ones whose name match the supplied argument (similar to `pytest -k xxxx`). Accepts a comma separated list; an exercise that matches several keywords runs once.
+- `--seed` sets the seed used to shuffle the exercise order. This matters most with `--num-tests`, which runs the first N exercises of the shuffled list, so the same seed gives the same subset. Without `--seed`, a continued run (`--cont`) reuses the seed of the earlier run in that directory, and a new run gets a random seed. The seed is printed at the start of the run.
 - `--read-model-settings=<filename.yml>` specify model settings, see here: https://aider.chat/docs/config/adv-model-settings.html#model-settings
 
 ### Benchmark report
@@ -118,9 +119,13 @@ The benchmark report is a yaml record with statistics about the run:
   command: aider --sonnet
   date: 2024-07-04
   versions: 0.42.1-dev
+  seed: 1234567890
+  exercises_commit: 4a1b2c3
   seconds_per_case: 17.6
   total_cost: 3.6346
 ```
+
+`seed` and `exercises_commit` are read from `.aider.run.json` in the run directory, which `benchmark.py` writes when a run starts. `exercises_commit` is the git commit of the exercises checkout (for example `polyglot-benchmark`). Reports for older runs, which have no `.aider.run.json`, omit both lines.
 
 The key statistics are the `pass_rate_#` entries, which report the
 percent of the tasks which had all tests passing.
@@ -137,6 +142,19 @@ should be enough to reliably reproduce any benchmark run.
 You can see examples of the benchmark report yaml in the
 [aider leaderboard data files](https://github.com/Aider-AI/aider/blob/main/aider/website/_data/).
 
+
+## Testing the harness
+
+The unit tests for the harness helpers are in `benchmark/test_benchmark.py`.
+They are not part of the default `pytest` run, which only collects `tests/`,
+and they need the dev dependencies (`pip install -e .[dev]`) because `benchmark.py`
+imports `lox`, `pandas` and `typer`. Run them from the repo root:
+
+```
+PYTHONPATH=benchmark:. pytest benchmark/test_benchmark.py
+```
+
+They do not call an LLM and do not need Docker.
 
 ## Limitations, notes
 
