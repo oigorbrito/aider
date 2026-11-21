@@ -4,9 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from benchmark.benchmark import (cleanup_test_output, filter_by_keywords,
-                                 read_run_info, resolve_seed,
-                                 shuffle_with_seed, write_run_info)
+from benchmark.benchmark import (
+    cleanup_test_output,
+    filter_by_keywords,
+    read_run_info,
+    resolve_seed,
+    shuffle_with_seed,
+    write_run_info,
+)
 
 
 class TestCleanupTestOutput(unittest.TestCase):
