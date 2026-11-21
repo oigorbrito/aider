@@ -239,8 +239,10 @@ def finish_login(
             interaction.notify(
                 {
                     "type": "progress",
-                    "message": "No callback from the browser yet. Paste the redirect URL or code"
-                    " here to finish.",
+                    "message": (
+                        "No callback from the browser yet. Paste the redirect URL or code"
+                        " here to finish."
+                    ),
                 }
             )
         pasted = interaction.prompt(paste_message)
