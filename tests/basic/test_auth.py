@@ -99,9 +99,14 @@ def test_login_api_key_rejects_empty_input(tmp_path):
 def test_login_oauth_stores_credential_from_provider(tmp_path, monkeypatch):
     fake = FakeOAuth("sk-browser")
     monkeypatch.setitem(
-        auth.PROVIDERS, "openrouter", auth.ProviderAuth(
-            id="openrouter", name="openrouter", env_var="OPENROUTER_API_KEY",
-            oauth=fake, methods=("browser", "key"),
+        auth.PROVIDERS,
+        "openrouter",
+        auth.ProviderAuth(
+            id="openrouter",
+            name="openrouter",
+            env_var="OPENROUTER_API_KEY",
+            oauth=fake,
+            methods=("browser", "key"),
         ),
     )
     store = _store(tmp_path)

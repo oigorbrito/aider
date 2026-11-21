@@ -35,8 +35,12 @@ def test_expired_sign_in_that_cannot_renew_tells_the_user_what_to_do(home, monke
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     main(
         [
-            "--model", "anthropic/claude-haiku-4-5",
-            "--no-git", "--no-check-update", "--yes", "--exit",
+            "--model",
+            "anthropic/claude-haiku-4-5",
+            "--no-git",
+            "--no-check-update",
+            "--yes",
+            "--exit",
         ],
         input=DummyInput(),
         output=DummyOutput(),
@@ -58,9 +62,13 @@ def test_fatal_api_error_with_message_exits_non_zero(home, monkeypatch):
     monkeypatch.setattr(models_module.litellm, "completion", refused)
     status = main(
         [
-            "--model", "deepseek/deepseek-chat",
-            "--no-git", "--no-check-update", "--yes",
-            "--message", "ok",
+            "--model",
+            "deepseek/deepseek-chat",
+            "--no-git",
+            "--no-check-update",
+            "--yes",
+            "--message",
+            "ok",
         ],
         input=DummyInput(),
         output=DummyOutput(),
@@ -78,9 +86,16 @@ def test_python_dash_m_passes_the_exit_status_to_the_shell(tmp_path):
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), AIDER_ANALYTICS="false")
     result = subprocess.run(
         [
-            sys.executable, "-m", "aider",
-            "--model", "anthropic/claude-haiku-4-5",
-            "--no-git", "--no-check-update", "--yes", "--message", "ok",
+            sys.executable,
+            "-m",
+            "aider",
+            "--model",
+            "anthropic/claude-haiku-4-5",
+            "--no-git",
+            "--no-check-update",
+            "--yes",
+            "--message",
+            "ok",
         ],
         cwd=str(tmp_path),
         env=env,
